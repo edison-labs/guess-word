@@ -7,7 +7,7 @@
 - 推荐至少 2 vCPU、2 GiB 内存、20 GiB 系统盘；
 - Alibaba Cloud Linux 3、Ubuntu 22.04/24.04 或 Debian 12；
 - 已分配公网 IPv4；
-- 安全组只向管理 IP 开放 SSH 22，向玩家开放 TCP 80；绑定域名和证书后再开放 443；
+- 安全组只向管理 IP 开放 SSH 22，向玩家开放 TCP 80；绑定域名和证书后再开放 443；应用容器默认仅监听本机 3100，由反向代理转发；
 - 已安装 Docker Engine、Docker Compose plugin、curl。
 
 阿里云 ECS 的构建部署功能也可以自动检查或安装 Docker。官方说明见：[部署应用代码到 ECS](https://help.aliyun.com/en/ecs/user-guide/deploy-applications)。
@@ -28,24 +28,26 @@ RUNTIME_PLATFORM=aliyun
 APP_ENV=production
 SEMANTIC_PROVIDER=deepseek-judge
 DATABASE_PATH=/data/guess-word.sqlite
+APP_BIND_ADDRESS=127.0.0.1
+APP_HOST_PORT=3100
 ```
 
 然后执行：
 
 ```bash
-npm run deploy:aliyun
+sudo sh scripts/deploy-aliyun.sh
 ```
 
-脚本会校验配置、构建镜像、启动容器，并等待 `/api/health` 返回成功。通过后可以访问 `http://ECS公网IP/`。
+脚本会校验配置、构建镜像、启动容器，并等待 `/api/health` 返回成功。默认服务地址为服务器本机的 `http://127.0.0.1:3100/`，应由现有 Nginx、Caddy 或负载均衡转发到公网 80/443。需要临时直接通过端口访问时，可把 `APP_BIND_ADDRESS` 改为 `0.0.0.0`，并只在安全组中放行 `APP_HOST_PORT`。
 
 ## 运维
 
 ```bash
-docker compose -f docker-compose.aliyun.yml ps
-docker compose -f docker-compose.aliyun.yml logs -f --tail=100 guess-word
-curl --fail http://127.0.0.1/api/health
+sudo docker compose --env-file .env.production -f docker-compose.aliyun.yml ps
+sudo docker compose --env-file .env.production -f docker-compose.aliyun.yml logs -f --tail=100 guess-word
+curl --fail http://127.0.0.1:3100/api/health
 ```
 
-题局数据位于 `guess-word-data` volume。更新应用时再次执行 `npm run deploy:aliyun`，volume 不会被替换。不要执行 `docker compose down -v`，它会删除题局数据库。
+题局数据位于 `guess-word-data` volume。更新应用时再次执行 `sudo sh scripts/deploy-aliyun.sh`，volume 不会被替换。不要执行 `docker compose down -v`，它会删除题局数据库。
 
 正式绑定域名时，应在前面增加阿里云负载均衡或 HTTPS 反向代理，证书和 443 配置完成后再把链接发给更多用户。
