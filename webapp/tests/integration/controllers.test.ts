@@ -144,6 +144,39 @@ describe('API controllers', () => {
     expect(response.status).toBe(201);
   });
 
+  it('uses browser fetch metadata when the standalone server rewrites every external host', async () => {
+    const { service } = createTestHarness();
+    const response = await createGameController(
+      new Request('http://127.0.0.1:3000/api/games', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: '127.0.0.1:3000',
+          Origin: 'http://47.119.123.28',
+          'Sec-Fetch-Site': 'same-origin',
+        },
+        body: JSON.stringify({ category: '动物' }),
+      }),
+      service,
+    );
+    expect(response.status).toBe(201);
+
+    const crossSite = await createGameController(
+      new Request('http://127.0.0.1:3000/api/games', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: '47.119.123.28',
+          Origin: 'http://47.119.123.28',
+          'Sec-Fetch-Site': 'cross-site',
+        },
+        body: JSON.stringify({ category: '动物' }),
+      }),
+      service,
+    );
+    expect(crossSite.status).toBe(400);
+  });
+
   it('accepts a trusted proxy origin while still rejecting a mismatched origin', async () => {
     const { service } = createTestHarness();
     const proxied = await createGameController(

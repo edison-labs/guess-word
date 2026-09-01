@@ -149,6 +149,14 @@ function assertOnlyKeys(body: Record<string, unknown>, allowed: readonly string[
 }
 
 function assertSameOrigin(request: Request): void {
+  const fetchSite = request.headers.get('sec-fetch-site');
+  if (fetchSite) {
+    if (fetchSite !== 'same-origin') {
+      throw invalidRequest('不允许跨站提交。');
+    }
+    return;
+  }
+
   const origin = request.headers.get('origin');
   if (!origin) return;
 
