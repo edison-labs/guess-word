@@ -1,0 +1,3 @@
+APP_ENV=test
+SEMANTIC_PROVIDER=deterministic
+TEST_QUESTION_ID=animal_penguin

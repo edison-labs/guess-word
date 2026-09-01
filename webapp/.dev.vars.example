@@ -1,0 +1,14 @@
+APP_ENV=development
+SEMANTIC_PROVIDER=deterministic
+TEST_QUESTION_ID=
+
+# To opt into real AI scoring, set SEMANTIC_PROVIDER=cloudflare-ai and fill
+# these server-only values in .dev.vars. Never commit the real token.
+CLOUDFLARE_ACCOUNT_ID=
+CLOUDFLARE_AI_API_TOKEN=
+CLOUDFLARE_AI_MODEL=@cf/baai/bge-m3
+
+# Or use DeepSeek's chat model as a cached semantic judge.
+# Set SEMANTIC_PROVIDER=deepseek-judge when selecting this path.
+DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-v4-flash

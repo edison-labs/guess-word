@@ -1,0 +1,15 @@
+node_modules
+.next
+.vinext
+dist
+coverage
+outputs
+test-results
+.wrangler
+.git
+.dev.vars
+.dev.vars.*
+.env*
+!.env.production.example
+npm-debug.log*
+*.tsbuildinfo
