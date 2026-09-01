@@ -150,9 +150,30 @@ function assertOnlyKeys(body: Record<string, unknown>, allowed: readonly string[
 
 function assertSameOrigin(request: Request): void {
   const origin = request.headers.get('origin');
-  if (origin && origin !== new URL(request.url).origin) {
+  if (!origin) return;
+
+  const requestUrl = new URL(request.url);
+  const allowedOrigins = new Set([requestUrl.origin]);
+  const forwardedHost = firstForwardedValue(request.headers.get('x-forwarded-host'));
+  const host = forwardedHost ?? request.headers.get('host');
+  const forwardedProtocol = firstForwardedValue(request.headers.get('x-forwarded-proto'));
+  const protocol = forwardedProtocol ?? requestUrl.protocol.slice(0, -1);
+
+  if (host && (protocol === 'http' || protocol === 'https')) {
+    try {
+      allowedOrigins.add(new URL(`${protocol}://${host}`).origin);
+    } catch {
+      // An invalid forwarding/host header must not weaken the origin check.
+    }
+  }
+
+  if (!allowedOrigins.has(origin)) {
     throw invalidRequest('不允许跨站提交。');
   }
+}
+
+function firstForwardedValue(value: string | null): string | undefined {
+  return value?.split(',', 1)[0]?.trim() || undefined;
 }
 
 function bearerToken(request: Request): string {

@@ -126,6 +126,57 @@ describe('API controllers', () => {
     expect(crossOrigin.status).toBe(400);
   });
 
+  it('accepts the browser origin when standalone Next.js sees an internal request URL', async () => {
+    const { service } = createTestHarness();
+    const response = await createGameController(
+      new Request('http://127.0.0.1:3000/api/games', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: '47.119.123.28',
+          Origin: 'http://47.119.123.28',
+        },
+        body: JSON.stringify({ category: '动物' }),
+      }),
+      service,
+    );
+
+    expect(response.status).toBe(201);
+  });
+
+  it('accepts a trusted proxy origin while still rejecting a mismatched origin', async () => {
+    const { service } = createTestHarness();
+    const proxied = await createGameController(
+      new Request('http://127.0.0.1:3000/api/games', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: '127.0.0.1:3000',
+          Origin: 'https://guess.example.com',
+          'X-Forwarded-Host': 'guess.example.com',
+          'X-Forwarded-Proto': 'https',
+        },
+        body: JSON.stringify({ category: '动物' }),
+      }),
+      service,
+    );
+    expect(proxied.status).toBe(201);
+
+    const mismatched = await createGameController(
+      new Request('http://127.0.0.1:3000/api/games', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: '47.119.123.28',
+          Origin: 'https://attacker.example',
+        },
+        body: JSON.stringify({ category: '动物' }),
+      }),
+      service,
+    );
+    expect(mismatched.status).toBe(400);
+  });
+
   it('returns each hint level and then a stable exhaustion error', async () => {
     const { harness, body } = await createViaApi();
     for (let level = 1; level <= 3; level += 1) {
