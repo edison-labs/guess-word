@@ -14,7 +14,7 @@ import {
   validateGuess,
 } from '../game-rules';
 import type { GameRecord, GameStore, GuessRecord } from './game-store';
-import { getQuestionById, selectRandomQuestion, type Question } from './questions';
+import { getQuestionById, selectDailyQuestion, selectRandomQuestion, type Question } from './questions';
 import { SemanticScorerError, type SemanticScorer } from './scoring';
 
 export class GameError extends Error {
@@ -64,6 +64,15 @@ export class GameService {
     if (question.category !== category) {
       throw new GameError('INTERNAL_ERROR', '所选分类暂时没有可用题目。', 500);
     }
+    return this.createGameForQuestion(question, 'random', null);
+  }
+
+  async createDailyGame(): Promise<CreateGameResponse> {
+    const date = chinaDate(this.now());
+    return this.createGameForQuestion(selectDailyQuestion(date), 'daily', date);
+  }
+
+  private async createGameForQuestion(question: Question, mode: 'random' | 'daily', dailyDate: string | null): Promise<CreateGameResponse> {
     const resumeToken = this.tokenGenerator();
     const game: GameRecord = {
       id: this.idGenerator(),
@@ -74,6 +83,8 @@ export class GameService {
       startedAt: this.now(),
       endedAt: null,
       hintCount: 0,
+      mode,
+      dailyDate,
     };
     await this.options.store.createGame(game);
     return { game: await this.toPublicGame(game, question), resumeToken };
@@ -116,9 +127,20 @@ export class GameService {
       let scoreMilliPercent = 100_000;
       if (!exact) {
         try {
-          scoreMilliPercent = capNonExactScore(
-            await this.options.scorer.scoreNonExact(validated.value, question),
-          );
+          const namespace = this.options.scorer.cacheNamespace;
+          const cached = namespace
+            ? await this.options.store.getSemanticScore(namespace, question.id, validated.value)
+            : null;
+          if (cached === null) {
+            scoreMilliPercent = capNonExactScore(
+              await this.options.scorer.scoreNonExact(validated.value, question),
+            );
+            if (namespace) {
+              await this.options.store.putSemanticScore(namespace, question.id, validated.value, scoreMilliPercent, this.now());
+            }
+          } else {
+            scoreMilliPercent = cached;
+          }
         } catch (error) {
           const isConfigurationError =
             (error instanceof SemanticScorerError && error.kind === 'configuration') ||
@@ -194,6 +216,20 @@ export class GameService {
     return this.toPublicGame(updated, question);
   }
 
+  async submitScoreFeedback(gameId: string, resumeToken: string, rawGuess: unknown, direction: unknown): Promise<void> {
+    const validated = validateGuess(rawGuess);
+    if (!validated.ok || (direction !== 'too_high' && direction !== 'too_low')) {
+      throw new GameError('VALIDATION_ERROR', '请选择“评分偏高”或“评分偏低”。', 400);
+    }
+    await this.authenticate(gameId, resumeToken);
+    if (!(await this.options.store.hasGuess(gameId, validated.value))) {
+      throw new GameError('VALIDATION_ERROR', '只能反馈本局已经猜过的词。', 400);
+    }
+    await this.options.store.recordScoreFeedback(gameId, validated.value, direction, this.now());
+  }
+
+  getAiStats() { return this.options.store.getAiStats(); }
+
   private async authenticate(
     gameId: string,
     resumeToken: string,
@@ -223,6 +259,8 @@ export class GameService {
       gameId: game.id,
       status: game.status,
       scoringMode: this.scoringMode,
+      mode: game.mode ?? 'random',
+      ...(game.dailyDate ? { dailyDate: game.dailyDate } : {}),
       category: question.category,
       startedAt: new Date(game.startedAt).toISOString(),
       ...(endedAt === undefined
@@ -239,6 +277,10 @@ export class GameService {
       bestGuess: bestGuess ? toPublicGuess(bestGuess) : null,
     };
   }
+}
+
+function chinaDate(timestamp: number): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(timestamp));
 }
 
 function toPublicGuess(record: GuessRecord): PublicGuess {

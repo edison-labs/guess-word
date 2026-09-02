@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { GAME_CATEGORIES } from '../../lib/contracts';
-import { QUESTIONS, selectRandomQuestion, validateQuestionBank } from '../../lib/server/questions';
+import { QUESTIONS, selectDailyQuestion, selectRandomQuestion, validateQuestionBank } from '../../lib/server/questions';
 
 describe('question bank', () => {
-  it('contains at least 100 valid and balanced questions across all categories', () => {
-    expect(QUESTIONS.length).toBeGreaterThanOrEqual(100);
+  it('contains at least 150 valid and balanced questions across all categories', () => {
+    expect(QUESTIONS.length).toBeGreaterThanOrEqual(150);
     expect(new Set(QUESTIONS.map((item) => item.category))).toEqual(new Set(GAME_CATEGORIES));
     for (const category of GAME_CATEGORIES) {
-      expect(QUESTIONS.filter((item) => item.category === category).length).toBeGreaterThanOrEqual(15);
+      expect(QUESTIONS.filter((item) => item.category === category).length).toBeGreaterThanOrEqual(25);
     }
     expect(validateQuestionBank(QUESTIONS)).toEqual([]);
+  });
+
+  it('selects one stable shared question per date', () => {
+    expect(selectDailyQuestion('2026-09-02')).toEqual(selectDailyQuestion('2026-09-02'));
+    expect(selectDailyQuestion('2026-09-02')).not.toEqual(selectDailyQuestion('2026-09-03'));
   });
 
   it('only selects questions from the requested category', () => {

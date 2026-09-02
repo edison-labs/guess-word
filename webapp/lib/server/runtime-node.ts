@@ -16,6 +16,8 @@ export async function getRuntimeGameService(): Promise<GameService> {
   return runtimeService;
 }
 
+export function getRuntimeAdminToken(): string | undefined { return process.env.ADMIN_API_TOKEN; }
+
 async function createRuntimeGameService(): Promise<GameService> {
   if (process.env.RUNTIME_PLATFORM !== 'aliyun') {
     throw new Error('CONFIGURATION_ERROR: Alibaba Cloud runtime is not enabled.');
@@ -30,7 +32,7 @@ async function createRuntimeGameService(): Promise<GameService> {
     : resolve(process.cwd(), databaseSetting);
   const store = new NodeSqliteGameStore(databasePath);
   await store.init();
-  const scorer = createSemanticScorer(readScorerEnvironment());
+  const scorer = createSemanticScorer(readScorerEnvironment(), (record) => store.recordAiUsage(record));
 
   if (process.env.TEST_QUESTION_ID) {
     throw new Error('CONFIGURATION_ERROR: TEST_QUESTION_ID is forbidden in production.');

@@ -1,0 +1,87 @@
+name: Build and deploy to Aliyun
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guess-word-production
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+      ACR_NAMESPACE: ${{ secrets.ACR_NAMESPACE }}
+      ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+      ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+      ECS_HOST: ${{ secrets.ECS_HOST }}
+      ECS_USER: ${{ secrets.ECS_USER }}
+      ECS_SSH_PRIVATE_KEY: ${{ secrets.ECS_SSH_PRIVATE_KEY }}
+      ECS_KNOWN_HOSTS: ${{ secrets.ECS_KNOWN_HOSTS }}
+      ECS_APP_DIR: /opt/guess-word/webapp
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ACR_REGISTRY ACR_NAMESPACE ACR_USERNAME ACR_PASSWORD ECS_HOST ECS_USER ECS_SSH_PRIVATE_KEY ECS_KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required production secret: ${name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Build and push immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${ACR_REGISTRY}/${ACR_NAMESPACE}/guess-word"
+          printf '%s' "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" --username "$ACR_USERNAME" --password-stdin
+          docker buildx create --use --name guess-word-builder
+          docker buildx build \
+            --platform linux/amd64 \
+            --file webapp/Dockerfile.aliyun \
+            --tag "${image}:${GITHUB_SHA}" \
+            --tag "${image}:latest" \
+            --provenance=false \
+            --push \
+            webapp
+
+      - name: Configure deployment SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$ECS_SSH_PRIVATE_KEY" > "$HOME/.ssh/guess-word-deploy"
+          chmod 600 "$HOME/.ssh/guess-word-deploy"
+          printf '%s\n' "$ECS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Upload release definition
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_args=(-i "$HOME/.ssh/guess-word-deploy" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          ssh "${ssh_args[@]}" "${ECS_USER}@${ECS_HOST}" "mkdir -p '${ECS_APP_DIR}/scripts'"
+          scp "${ssh_args[@]}" webapp/docker-compose.aliyun.release.yml "${ECS_USER}@${ECS_HOST}:${ECS_APP_DIR}/docker-compose.aliyun.release.yml"
+          scp "${ssh_args[@]}" webapp/scripts/deploy-aliyun-release.sh "${ECS_USER}@${ECS_HOST}:${ECS_APP_DIR}/scripts/deploy-aliyun-release.sh"
+
+      - name: Deploy immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${ACR_REGISTRY}/${ACR_NAMESPACE}/guess-word:${GITHUB_SHA}"
+          ssh_args=(-i "$HOME/.ssh/guess-word-deploy" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          ssh "${ssh_args[@]}" "${ECS_USER}@${ECS_HOST}" \
+            "cd '${ECS_APP_DIR}' && ACR_IMAGE='${image}' sh scripts/deploy-aliyun-release.sh"

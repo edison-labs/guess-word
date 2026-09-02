@@ -1,7 +1,9 @@
 import { calibrateSimilarity, capNonExactScore, cosineSimilarity } from '../game-rules';
 import { deterministicVectorForText, type Question } from './questions';
+import type { AiUsageRecord } from './game-store';
 
 export interface SemanticScorer {
+  readonly cacheNamespace?: string;
   scoreNonExact(normalizedGuess: string, question: Question): Promise<number>;
 }
 
@@ -17,6 +19,7 @@ export class SemanticScorerError extends Error {
 }
 
 export class DeterministicSemanticScorer implements SemanticScorer {
+  readonly cacheNamespace = 'deterministic:v1';
   async scoreNonExact(normalizedGuess: string, question: Question): Promise<number> {
     const guessVector = deterministicVectorForText(normalizedGuess, question);
     return calibrateSimilarity(cosineSimilarity(guessVector, question.testVector));
@@ -31,10 +34,13 @@ type CloudflareAiConfig = {
 };
 
 export class CloudflareAiSemanticScorer implements SemanticScorer {
+  readonly cacheNamespace: string;
   private readonly embeddingCache = new Map<string, readonly number[]>();
   private readonly resultCache = new Map<string, number>();
 
-  constructor(private readonly config: CloudflareAiConfig) {}
+  constructor(private readonly config: CloudflareAiConfig) {
+    this.cacheNamespace = `cloudflare:${config.model}:v1`;
+  }
 
   async scoreNonExact(normalizedGuess: string, question: Question): Promise<number> {
     const resultKey = `${this.config.model}:v1:${question.id}:${normalizedGuess}`;
@@ -178,6 +184,7 @@ type DeepSeekJudgeConfig = {
   apiKey: string;
   model: string;
   timeoutMs?: number;
+  onUsage?: (record: AiUsageRecord) => Promise<void>;
 };
 
 const DEEPSEEK_SCORING_PROMPT = `你是中文猜词游戏的关联度评审。比较“猜测词”与“目标词”，只输出 JSON：{"meaning":数字,"context":数字,"specificity":数字}。
@@ -185,9 +192,12 @@ const DEEPSEEK_SCORING_PROMPT = `你是中文猜词游戏的关联度评审。�
 无明显关系应接近 0；不要仅因常识共现就把 meaning 判高；必须区分宽泛类别、直接类别和典型场景。使用完整区间，不要习惯性返回整十或以 .000 结尾。小数必须来自你的语义判断，不能使用随机数。不要输出总分、解释、Markdown 或其他字段。相同输入应给出相同分数。`;
 
 export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
+  readonly cacheNamespace: string;
   private readonly resultCache = new Map<string, number>();
 
-  constructor(private readonly config: DeepSeekJudgeConfig) {}
+  constructor(private readonly config: DeepSeekJudgeConfig) {
+    this.cacheNamespace = `deepseek:${config.model}:v4`;
+  }
 
   async scoreNonExact(normalizedGuess: string, question: Question): Promise<number> {
     const resultKey = `${this.config.model}:v4:${question.id}:${normalizedGuess}`;
@@ -196,6 +206,7 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 12_000);
+    const startedAt = Date.now();
     try {
       const response = await fetch('https://api.deepseek.com/chat/completions', {
         method: 'POST',
@@ -234,6 +245,12 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
 
       let body: {
         choices?: Array<{ message?: { content?: unknown } }>;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          prompt_cache_hit_tokens?: number;
+          prompt_cache_miss_tokens?: number;
+        };
       };
       try {
         body = (await response.json()) as typeof body;
@@ -288,6 +305,27 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
       const score = capNonExactScore(
         Math.round((meaning * 0.35 + context * 0.4 + specificity * 0.25) * 1000),
       );
+      const usage = body.usage;
+      if (usage && this.config.onUsage) {
+        const cached = safeTokenCount(usage.prompt_cache_hit_tokens);
+        const prompt = safeTokenCount(usage.prompt_tokens);
+        const miss = Math.max(0, safeTokenCount(usage.prompt_cache_miss_tokens) || prompt - cached);
+        const completion = safeTokenCount(usage.completion_tokens);
+        await this.config.onUsage({
+          id: crypto.randomUUID(),
+          providerKey: this.cacheNamespace,
+          questionId: question.id,
+          normalizedGuess,
+          promptTokens: prompt,
+          cachedPromptTokens: cached,
+          completionTokens: completion,
+          latencyMs: Math.max(0, Date.now() - startedAt),
+          // DeepSeek V4 Flash: $0.14/M cache-miss input,
+          // $0.0028/M cache-hit input and $0.28/M output.
+          estimatedCostMicrousd: Math.round(miss * 0.14 + cached * 0.0028 + completion * 0.28),
+          createdAt: Date.now(),
+        }).catch(() => undefined);
+      }
       if (this.resultCache.size > 2_000) this.resultCache.clear();
       this.resultCache.set(resultKey, score);
       return score;
@@ -313,7 +351,10 @@ export type ScorerEnvironment = {
   DEEPSEEK_MODEL?: string;
 };
 
-export function createSemanticScorer(config: ScorerEnvironment): SemanticScorer {
+export function createSemanticScorer(
+  config: ScorerEnvironment,
+  onUsage?: (record: AiUsageRecord) => Promise<void>,
+): SemanticScorer {
   if (config.SEMANTIC_PROVIDER === 'deterministic') {
     if (config.APP_ENV === 'production') {
       throw new Error('CONFIGURATION_ERROR: deterministic scoring is forbidden in production.');
@@ -342,8 +383,13 @@ export function createSemanticScorer(config: ScorerEnvironment): SemanticScorer 
     return new DeepSeekJudgeSemanticScorer({
       apiKey: config.DEEPSEEK_API_KEY,
       model: config.DEEPSEEK_MODEL || 'deepseek-v4-flash',
+      onUsage,
     });
   }
 
   throw new Error('CONFIGURATION_ERROR: SEMANTIC_PROVIDER must be configured explicitly.');
+}
+
+function safeTokenCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
 }

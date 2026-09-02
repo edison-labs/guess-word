@@ -31,6 +31,17 @@ export async function createGameController(
   }
 }
 
+export async function createDailyGameController(request: Request, service: GameService): Promise<Response> {
+  try {
+    assertSameOrigin(request);
+    const body = await parseJsonObject(request);
+    assertOnlyKeys(body, []);
+    return json(await service.createDailyGame(), 201);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
 export async function restoreGameController(
   request: Request,
   service: GameService,
@@ -87,6 +98,25 @@ export async function abandonGameController(
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+export async function scoreFeedbackController(request: Request, service: GameService, gameId: string): Promise<Response> {
+  try {
+    assertSameOrigin(request);
+    const body = await parseJsonObject(request);
+    assertOnlyKeys(body, ['guess', 'direction']);
+    await service.submitScoreFeedback(gameId, bearerToken(request), body.guess, body.direction);
+    return json({ accepted: true });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function aiStatsController(request: Request, service: GameService, adminToken?: string): Promise<Response> {
+  if (!adminToken || request.headers.get('authorization') !== `Bearer ${adminToken}`) {
+    return json<ApiErrorBody>({ error: { code: 'GAME_NOT_FOUND', message: '接口不存在。', retryable: false } }, 404);
+  }
+  return json({ stats: await service.getAiStats() });
 }
 
 function json<T>(body: T, status = 200): Response {

@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { GameStatus, Temperature } from '../contracts';
+import type { GameMode, GameStatus, Temperature } from '../contracts';
 import type {
   ClaimGuessResult,
   CommitGuessResult,
@@ -10,6 +10,8 @@ import type {
   GameStore,
   GuessRecord,
   HintMutationResult,
+  AiStats,
+  AiUsageRecord,
 } from './game-store';
 
 type GameRow = {
@@ -21,6 +23,8 @@ type GameRow = {
   started_at: number;
   ended_at: number | null;
   hint_count: number;
+  mode: GameMode;
+  daily_date: string | null;
 };
 
 type GuessRow = {
@@ -66,6 +70,8 @@ export class NodeSqliteGameStore implements GameStore {
         started_at INTEGER NOT NULL,
         ended_at INTEGER,
         hint_count INTEGER NOT NULL DEFAULT 0 CHECK (hint_count BETWEEN 0 AND 3)
+        ,mode TEXT NOT NULL DEFAULT 'random' CHECK (mode IN ('random','daily'))
+        ,daily_date TEXT
       );
       CREATE TABLE IF NOT EXISTS guesses (
         game_id TEXT NOT NULL,
@@ -88,6 +94,22 @@ export class NodeSqliteGameStore implements GameStore {
         PRIMARY KEY (game_id, normalized_guess),
         FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
       );
+      CREATE TABLE IF NOT EXISTS semantic_scores (
+        provider_key TEXT NOT NULL, question_id TEXT NOT NULL, normalized_guess TEXT NOT NULL,
+        score_milli_percent INTEGER NOT NULL CHECK (score_milli_percent BETWEEN 0 AND 100000),
+        created_at INTEGER NOT NULL, PRIMARY KEY (provider_key, question_id, normalized_guess)
+      );
+      CREATE TABLE IF NOT EXISTS ai_usage (
+        id TEXT PRIMARY KEY NOT NULL, provider_key TEXT NOT NULL, question_id TEXT NOT NULL,
+        normalized_guess TEXT NOT NULL, prompt_tokens INTEGER NOT NULL, cached_prompt_tokens INTEGER NOT NULL,
+        completion_tokens INTEGER NOT NULL, latency_ms INTEGER NOT NULL,
+        estimated_cost_microusd INTEGER NOT NULL, created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS score_feedback (
+        game_id TEXT NOT NULL, normalized_guess TEXT NOT NULL,
+        direction TEXT NOT NULL CHECK (direction IN ('too_high','too_low')), created_at INTEGER NOT NULL,
+        PRIMARY KEY (game_id, normalized_guess), FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+      );
       CREATE INDEX IF NOT EXISTS idx_guesses_game_sequence
         ON guesses(game_id, sequence);
       CREATE INDEX IF NOT EXISTS idx_guesses_game_score
@@ -97,6 +119,9 @@ export class NodeSqliteGameStore implements GameStore {
     `);
 
     const columns = this.db.prepare('PRAGMA table_info(guesses)').all() as Array<{ name: string }>;
+    const gameColumns = this.db.prepare('PRAGMA table_info(games)').all() as Array<{ name: string }>;
+    if (!gameColumns.some((column) => column.name === 'mode')) this.db.exec("ALTER TABLE games ADD COLUMN mode TEXT NOT NULL DEFAULT 'random'");
+    if (!gameColumns.some((column) => column.name === 'daily_date')) this.db.exec('ALTER TABLE games ADD COLUMN daily_date TEXT');
     if (!columns.some((column) => column.name === 'score_milli_percent')) {
       this.db.exec('ALTER TABLE guesses ADD COLUMN score_milli_percent INTEGER NOT NULL DEFAULT 0');
     }
@@ -117,8 +142,8 @@ export class NodeSqliteGameStore implements GameStore {
     await this.init();
     this.db.prepare(`
       INSERT INTO games (
-        id, resume_token_hash, question_id, category, status, started_at, ended_at, hint_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, resume_token_hash, question_id, category, status, started_at, ended_at, hint_count, mode, daily_date
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       game.id,
       game.resumeTokenHash,
@@ -128,6 +153,8 @@ export class NodeSqliteGameStore implements GameStore {
       game.startedAt,
       game.endedAt,
       game.hintCount,
+      game.mode ?? 'random',
+      game.dailyDate ?? null,
     );
   }
 
@@ -273,6 +300,31 @@ export class NodeSqliteGameStore implements GameStore {
     });
   }
 
+  async getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<number | null> {
+    await this.init();
+    const row = this.db.prepare('SELECT score_milli_percent FROM semantic_scores WHERE provider_key = ? AND question_id = ? AND normalized_guess = ?').get(providerKey, questionId, normalizedGuess) as { score_milli_percent:number } | undefined;
+    return row?.score_milli_percent ?? null;
+  }
+  async putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, scoreMilliPercent: number, createdAt: number): Promise<void> {
+    await this.init();
+    this.db.prepare(`INSERT INTO semantic_scores VALUES (?, ?, ?, ?, ?) ON CONFLICT(provider_key, question_id, normalized_guess) DO UPDATE SET score_milli_percent=excluded.score_milli_percent, created_at=excluded.created_at`).run(providerKey, questionId, normalizedGuess, scoreMilliPercent, createdAt);
+  }
+  async recordAiUsage(record: AiUsageRecord): Promise<void> {
+    await this.init();
+    this.db.prepare('INSERT OR IGNORE INTO ai_usage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(record.id, record.providerKey, record.questionId, record.normalizedGuess, record.promptTokens, record.cachedPromptTokens, record.completionTokens, record.latencyMs, record.estimatedCostMicrousd, record.createdAt);
+  }
+  async recordScoreFeedback(gameId: string, normalizedGuess: string, direction: 'too_high' | 'too_low', createdAt: number): Promise<void> {
+    await this.init();
+    this.db.prepare(`INSERT INTO score_feedback VALUES (?, ?, ?, ?) ON CONFLICT(game_id, normalized_guess) DO UPDATE SET direction=excluded.direction, created_at=excluded.created_at`).run(gameId, normalizedGuess, direction, createdAt);
+  }
+  async getAiStats(): Promise<AiStats> {
+    await this.init();
+    const usage = this.db.prepare('SELECT COUNT(*) requests, COALESCE(SUM(prompt_tokens),0) prompt_tokens, COALESCE(SUM(cached_prompt_tokens),0) cached_prompt_tokens, COALESCE(SUM(completion_tokens),0) completion_tokens, COALESCE(SUM(estimated_cost_microusd),0) cost FROM ai_usage').get() as { requests:number; prompt_tokens:number; cached_prompt_tokens:number; completion_tokens:number; cost:number };
+    const cache = this.db.prepare('SELECT COUNT(*) count FROM semantic_scores').get() as { count:number };
+    const feedback = this.db.prepare('SELECT COUNT(*) count FROM score_feedback').get() as { count:number };
+    return { requests: usage.requests, promptTokens: usage.prompt_tokens, cachedPromptTokens: usage.cached_prompt_tokens, completionTokens: usage.completion_tokens, estimatedCostUsd: usage.cost / 1_000_000, cacheEntries: cache.count, feedbackCount: feedback.count };
+  }
+
   private getGameSync(id: string): GameRecord | null {
     const row = this.db.prepare('SELECT * FROM games WHERE id = ?').get(id) as GameRow | undefined;
     return row ? mapGame(row) : null;
@@ -316,6 +368,8 @@ function mapGame(row: GameRow): GameRecord {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     hintCount: row.hint_count,
+    mode: row.mode ?? 'random',
+    dailyDate: row.daily_date ?? null,
   };
 }
 

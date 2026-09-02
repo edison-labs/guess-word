@@ -17,11 +17,15 @@ export async function getRuntimeGameService(): Promise<GameService> {
   return runtimeService;
 }
 
+export function getRuntimeAdminToken(): string | undefined {
+  return (env as unknown as { ADMIN_API_TOKEN?: string }).ADMIN_API_TOKEN;
+}
+
 async function createRuntimeGameService(): Promise<GameService> {
   if (!env.DB) throw new Error('CONFIGURATION_ERROR: D1 binding DB is unavailable.');
   const store = new D1GameStore(env.DB);
   await store.init();
-  const scorer = createSemanticScorer(env);
+  const scorer = createSemanticScorer(env, (record) => store.recordAiUsage(record));
   const fixedQuestion =
     env.APP_ENV !== 'production' && env.TEST_QUESTION_ID
       ? getQuestionById(env.TEST_QUESTION_ID)

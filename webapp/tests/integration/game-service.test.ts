@@ -22,6 +22,24 @@ describe('game service integration', () => {
     expect(await service.restoreGame(created.game.gameId, created.resumeToken)).toEqual(created.game);
   });
 
+  it('creates a dated daily challenge', async () => {
+    const { service } = createTestHarness();
+    const created = await service.createDailyGame();
+    expect(created.game).toMatchObject({ mode: 'daily', dailyDate: '2026-08-30', status: 'active' });
+  });
+
+  it('reuses a persistent semantic score across games and records feedback', async () => {
+    const scorer: SemanticScorer = { cacheNamespace: 'test:model:v1', scoreNonExact: vi.fn(async () => 61_234) };
+    const { service } = createTestHarness(scorer);
+    const first = await service.createGame('动物');
+    const second = await service.createGame('动物');
+    await service.submitGuess(first.game.gameId, first.resumeToken, '海豹');
+    await service.submitGuess(second.game.gameId, second.resumeToken, '海豹');
+    expect(scorer.scoreNonExact).toHaveBeenCalledTimes(1);
+    await service.submitScoreFeedback(first.game.gameId, first.resumeToken, '海豹', 'too_high');
+    expect(await service.getAiStats()).toMatchObject({ cacheEntries: 1, feedbackCount: 1 });
+  });
+
   it('submits guesses, updates the best guess, and caps non-exact scores', async () => {
     const scorer: SemanticScorer = { scoreNonExact: vi.fn(async () => 500_000) };
     const { service } = createTestHarness(scorer);

@@ -89,4 +89,14 @@ describe('NodeSqliteGameStore', () => {
     });
     expect(await store.useHint('game-1')).toBe('finished');
   });
+
+  it('persists AI cache, usage totals and score feedback', async () => {
+    const { store } = createStore();
+    await store.createGame(game());
+    await store.putSemanticScore('deepseek:model:v4', 'animal_penguin', '海豹', 72_345, 2_000);
+    await store.recordAiUsage({ id: 'usage-1', providerKey: 'deepseek:model:v4', questionId: 'animal_penguin', normalizedGuess: '海豹', promptTokens: 100, cachedPromptTokens: 80, completionTokens: 12, latencyMs: 300, estimatedCostMicrousd: 7, createdAt: 2_000 });
+    await store.recordScoreFeedback('game-1', '海豹', 'too_low', 2_100);
+    expect(await store.getSemanticScore('deepseek:model:v4', 'animal_penguin', '海豹')).toBe(72_345);
+    expect(await store.getAiStats()).toEqual({ requests: 1, promptTokens: 100, cachedPromptTokens: 80, completionTokens: 12, estimatedCostUsd: 0.000007, cacheEntries: 1, feedbackCount: 1 });
+  });
 });

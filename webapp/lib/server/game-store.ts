@@ -1,4 +1,4 @@
-import type { GameStatus, Temperature } from '../contracts';
+import type { GameMode, GameStatus, Temperature } from '../contracts';
 
 export type GameRecord = {
   id: string;
@@ -9,6 +9,8 @@ export type GameRecord = {
   startedAt: number;
   endedAt: number | null;
   hintCount: number;
+  mode?: GameMode;
+  dailyDate?: string | null;
 };
 
 export type GuessRecord = {
@@ -30,6 +32,29 @@ export type ClaimGuessResult =
   | 'missing';
 export type HintMutationResult = number | 'exhausted' | 'finished' | 'missing';
 export type FinishMutationResult = 'finished' | 'already-finished' | 'missing';
+
+export type AiUsageRecord = {
+  id: string;
+  providerKey: string;
+  questionId: string;
+  normalizedGuess: string;
+  promptTokens: number;
+  cachedPromptTokens: number;
+  completionTokens: number;
+  latencyMs: number;
+  estimatedCostMicrousd: number;
+  createdAt: number;
+};
+
+export type AiStats = {
+  requests: number;
+  promptTokens: number;
+  cachedPromptTokens: number;
+  completionTokens: number;
+  estimatedCostUsd: number;
+  cacheEntries: number;
+  feedbackCount: number;
+};
 
 export interface GameStore {
   createGame(game: GameRecord): Promise<void>;
@@ -56,6 +81,11 @@ export interface GameStore {
   ): Promise<CommitGuessResult | 'claim-lost'>;
   useHint(gameId: string): Promise<HintMutationResult>;
   abandon(gameId: string, endedAt: number): Promise<FinishMutationResult>;
+  getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<number | null>;
+  putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, scoreMilliPercent: number, createdAt: number): Promise<void>;
+  recordAiUsage(record: AiUsageRecord): Promise<void>;
+  recordScoreFeedback(gameId: string, normalizedGuess: string, direction: 'too_high' | 'too_low', createdAt: number): Promise<void>;
+  getAiStats(): Promise<AiStats>;
 }
 
 type GameRow = {
@@ -67,6 +97,8 @@ type GameRow = {
   started_at: number;
   ended_at: number | null;
   hint_count: number;
+  mode: GameMode;
+  daily_date: string | null;
 };
 
 type GuessRow = {
@@ -90,6 +122,8 @@ function mapGame(row: GameRow): GameRecord {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     hintCount: row.hint_count,
+    mode: row.mode ?? 'random',
+    dailyDate: row.daily_date ?? null,
   };
 }
 
@@ -129,6 +163,8 @@ export class D1GameStore implements GameStore {
           started_at INTEGER NOT NULL,
           ended_at INTEGER,
           hint_count INTEGER NOT NULL DEFAULT 0 CHECK (hint_count BETWEEN 0 AND 3)
+          ,mode TEXT NOT NULL DEFAULT 'random' CHECK (mode IN ('random','daily'))
+          ,daily_date TEXT
         )
       `),
       this.db.prepare(`
@@ -158,10 +194,34 @@ export class D1GameStore implements GameStore {
       `),
       this.db.prepare('CREATE INDEX IF NOT EXISTS idx_guesses_game_sequence ON guesses(game_id, sequence)'),
       this.db.prepare('CREATE INDEX IF NOT EXISTS idx_guesses_game_score ON guesses(game_id, score_tenths DESC, sequence)'),
+      this.db.prepare(`CREATE TABLE IF NOT EXISTS semantic_scores (
+        provider_key TEXT NOT NULL, question_id TEXT NOT NULL, normalized_guess TEXT NOT NULL,
+        score_milli_percent INTEGER NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (provider_key, question_id, normalized_guess)
+      )`),
+      this.db.prepare(`CREATE TABLE IF NOT EXISTS ai_usage (
+        id TEXT PRIMARY KEY NOT NULL, provider_key TEXT NOT NULL, question_id TEXT NOT NULL,
+        normalized_guess TEXT NOT NULL, prompt_tokens INTEGER NOT NULL,
+        cached_prompt_tokens INTEGER NOT NULL, completion_tokens INTEGER NOT NULL,
+        latency_ms INTEGER NOT NULL, estimated_cost_microusd INTEGER NOT NULL, created_at INTEGER NOT NULL
+      )`),
+      this.db.prepare(`CREATE TABLE IF NOT EXISTS score_feedback (
+        game_id TEXT NOT NULL, normalized_guess TEXT NOT NULL,
+        direction TEXT NOT NULL CHECK (direction IN ('too_high','too_low')), created_at INTEGER NOT NULL,
+        PRIMARY KEY (game_id, normalized_guess),
+        FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+      )`),
     ]);
     const columns = await this.db
       .prepare('PRAGMA table_info(guesses)')
       .all<{ name: string }>();
+    const gameColumns = await this.db.prepare('PRAGMA table_info(games)').all<{ name: string }>();
+    if (!gameColumns.results.some((column) => column.name === 'mode')) {
+      await this.db.prepare("ALTER TABLE games ADD COLUMN mode TEXT NOT NULL DEFAULT 'random'").run();
+    }
+    if (!gameColumns.results.some((column) => column.name === 'daily_date')) {
+      await this.db.prepare('ALTER TABLE games ADD COLUMN daily_date TEXT').run();
+    }
     if (!columns.results.some((column) => column.name === 'score_milli_percent')) {
       await this.db
         .prepare('ALTER TABLE guesses ADD COLUMN score_milli_percent INTEGER NOT NULL DEFAULT 0')
@@ -188,8 +248,8 @@ export class D1GameStore implements GameStore {
     await this.db
       .prepare(`
         INSERT INTO games (
-          id, resume_token_hash, question_id, category, status, started_at, ended_at, hint_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          id, resume_token_hash, question_id, category, status, started_at, ended_at, hint_count, mode, daily_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .bind(
         game.id,
@@ -200,6 +260,8 @@ export class D1GameStore implements GameStore {
         game.startedAt,
         game.endedAt,
         game.hintCount,
+        game.mode ?? 'random',
+        game.dailyDate ?? null,
       )
       .run();
   }
@@ -393,12 +455,44 @@ export class D1GameStore implements GameStore {
     const game = await this.getGame(gameId);
     return game ? 'already-finished' : 'missing';
   }
+
+  async getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<number | null> {
+    await this.init();
+    const row = await this.db.prepare('SELECT score_milli_percent FROM semantic_scores WHERE provider_key = ? AND question_id = ? AND normalized_guess = ?').bind(providerKey, questionId, normalizedGuess).first<{ score_milli_percent: number }>();
+    return row?.score_milli_percent ?? null;
+  }
+
+  async putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, scoreMilliPercent: number, createdAt: number): Promise<void> {
+    await this.init();
+    await this.db.prepare(`INSERT INTO semantic_scores VALUES (?, ?, ?, ?, ?) ON CONFLICT(provider_key, question_id, normalized_guess) DO UPDATE SET score_milli_percent = excluded.score_milli_percent, created_at = excluded.created_at`).bind(providerKey, questionId, normalizedGuess, scoreMilliPercent, createdAt).run();
+  }
+
+  async recordAiUsage(record: AiUsageRecord): Promise<void> {
+    await this.init();
+    await this.db.prepare('INSERT OR IGNORE INTO ai_usage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(record.id, record.providerKey, record.questionId, record.normalizedGuess, record.promptTokens, record.cachedPromptTokens, record.completionTokens, record.latencyMs, record.estimatedCostMicrousd, record.createdAt).run();
+  }
+
+  async recordScoreFeedback(gameId: string, normalizedGuess: string, direction: 'too_high' | 'too_low', createdAt: number): Promise<void> {
+    await this.init();
+    await this.db.prepare(`INSERT INTO score_feedback VALUES (?, ?, ?, ?) ON CONFLICT(game_id, normalized_guess) DO UPDATE SET direction = excluded.direction, created_at = excluded.created_at`).bind(gameId, normalizedGuess, direction, createdAt).run();
+  }
+
+  async getAiStats(): Promise<AiStats> {
+    await this.init();
+    const usage = await this.db.prepare('SELECT COUNT(*) requests, COALESCE(SUM(prompt_tokens),0) prompt_tokens, COALESCE(SUM(cached_prompt_tokens),0) cached_prompt_tokens, COALESCE(SUM(completion_tokens),0) completion_tokens, COALESCE(SUM(estimated_cost_microusd),0) cost FROM ai_usage').first<{ requests:number; prompt_tokens:number; cached_prompt_tokens:number; completion_tokens:number; cost:number }>();
+    const cache = await this.db.prepare('SELECT COUNT(*) count FROM semantic_scores').first<{ count:number }>();
+    const feedback = await this.db.prepare('SELECT COUNT(*) count FROM score_feedback').first<{ count:number }>();
+    return { requests: usage?.requests ?? 0, promptTokens: usage?.prompt_tokens ?? 0, cachedPromptTokens: usage?.cached_prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0, estimatedCostUsd: (usage?.cost ?? 0) / 1_000_000, cacheEntries: cache?.count ?? 0, feedbackCount: feedback?.count ?? 0 };
+  }
 }
 
 export class MemoryGameStore implements GameStore {
   private readonly games = new Map<string, GameRecord>();
   private readonly guesses = new Map<string, GuessRecord[]>();
   private readonly guessClaims = new Map<string, { token: string; claimedAt: number }>();
+  private readonly semanticScores = new Map<string, number>();
+  private readonly aiUsage: AiUsageRecord[] = [];
+  private readonly feedback = new Map<string, 'too_high' | 'too_low'>();
 
   async createGame(game: GameRecord): Promise<void> {
     if (this.games.has(game.id)) throw new Error('Duplicate game id.');
@@ -496,6 +590,26 @@ export class MemoryGameStore implements GameStore {
     game.status = 'abandoned';
     game.endedAt = endedAt;
     return 'finished';
+  }
+
+  async getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<number | null> {
+    return this.semanticScores.get(`${providerKey}\u0000${questionId}\u0000${normalizedGuess}`) ?? null;
+  }
+  async putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, scoreMilliPercent: number): Promise<void> {
+    this.semanticScores.set(`${providerKey}\u0000${questionId}\u0000${normalizedGuess}`, scoreMilliPercent);
+  }
+  async recordAiUsage(record: AiUsageRecord): Promise<void> { this.aiUsage.push({ ...record }); }
+  async recordScoreFeedback(gameId: string, normalizedGuess: string, direction: 'too_high' | 'too_low'): Promise<void> { this.feedback.set(`${gameId}\u0000${normalizedGuess}`, direction); }
+  async getAiStats(): Promise<AiStats> {
+    return {
+      requests: this.aiUsage.length,
+      promptTokens: this.aiUsage.reduce((sum, item) => sum + item.promptTokens, 0),
+      cachedPromptTokens: this.aiUsage.reduce((sum, item) => sum + item.cachedPromptTokens, 0),
+      completionTokens: this.aiUsage.reduce((sum, item) => sum + item.completionTokens, 0),
+      estimatedCostUsd: this.aiUsage.reduce((sum, item) => sum + item.estimatedCostMicrousd, 0) / 1_000_000,
+      cacheEntries: this.semanticScores.size,
+      feedbackCount: this.feedback.size,
+    };
   }
 }
 

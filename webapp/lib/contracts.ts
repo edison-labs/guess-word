@@ -1,5 +1,6 @@
 export type GameStatus = 'active' | 'won' | 'abandoned';
 export type ScoringMode = 'test' | 'semantic';
+export type GameMode = 'random' | 'daily';
 
 export const GAME_CATEGORIES = [
   '动物',
@@ -43,6 +44,8 @@ export type PublicGame = {
   gameId: string;
   status: GameStatus;
   scoringMode: ScoringMode;
+  mode?: GameMode;
+  dailyDate?: string;
   category: GameCategory;
   startedAt: string;
   endedAt?: string;

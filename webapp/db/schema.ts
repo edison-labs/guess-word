@@ -9,6 +9,8 @@ export const games = sqliteTable('games', {
   startedAt: integer('started_at').notNull(),
   endedAt: integer('ended_at'),
   hintCount: integer('hint_count').notNull().default(0),
+  mode: text('mode', { enum: ['random', 'daily'] }).notNull().default('random'),
+  dailyDate: text('daily_date'),
 });
 
 export const guesses = sqliteTable(
@@ -51,3 +53,25 @@ export const guessClaims = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.gameId, table.normalizedGuess] })],
 );
+
+export const semanticScores = sqliteTable('semantic_scores', {
+  providerKey: text('provider_key').notNull(),
+  questionId: text('question_id').notNull(),
+  normalizedGuess: text('normalized_guess').notNull(),
+  scoreMilliPercent: integer('score_milli_percent').notNull(),
+  createdAt: integer('created_at').notNull(),
+}, (table) => [primaryKey({ columns: [table.providerKey, table.questionId, table.normalizedGuess] })]);
+
+export const aiUsage = sqliteTable('ai_usage', {
+  id: text('id').primaryKey().notNull(), providerKey: text('provider_key').notNull(),
+  questionId: text('question_id').notNull(), normalizedGuess: text('normalized_guess').notNull(),
+  promptTokens: integer('prompt_tokens').notNull(), cachedPromptTokens: integer('cached_prompt_tokens').notNull(),
+  completionTokens: integer('completion_tokens').notNull(), latencyMs: integer('latency_ms').notNull(),
+  estimatedCostMicrousd: integer('estimated_cost_microusd').notNull(), createdAt: integer('created_at').notNull(),
+});
+
+export const scoreFeedback = sqliteTable('score_feedback', {
+  gameId: text('game_id').notNull().references(() => games.id, { onDelete: 'cascade' }),
+  normalizedGuess: text('normalized_guess').notNull(), direction: text('direction', { enum: ['too_high', 'too_low'] }).notNull(),
+  createdAt: integer('created_at').notNull(),
+}, (table) => [primaryKey({ columns: [table.gameId, table.normalizedGuess] })]);

@@ -147,11 +147,60 @@ export const QUESTIONS: readonly Question[] = [
   question('object_microwave', '微波炉', '日常物品', '快速加热食物的厨房电器', '加热', 5, -0.6, 0.4),
   question('object_headphones', '耳机', '日常物品', '贴近耳朵播放声音的设备', '听歌', 5, -0.5, -0.7),
   question('object_alarm', '闹钟', '日常物品', '在设定时间发声提醒的用品', '起床', 5, 0.1, -0.6),
+
+  question('animal_koala', '考拉', '动物', '栖息在树上并以桉树叶为食的动物', '桉树', 0, 0.4, 0.8),
+  question('animal_polarbear', '北极熊', '动物', '生活在北极地区的大型熊科动物', '浮冰', 0, -0.8, 0.6),
+  question('animal_hedgehog', '刺猬', '动物', '背部长满硬刺的小型哺乳动物', '尖刺', 0, 0.2, 0.5),
+  question('animal_flamingo', '火烈鸟', '动物', '羽毛粉红且腿部修长的水鸟', '盐湖', 0, -0.3, -0.6),
+  question('animal_seahorse', '海马', '动物', '头部似马的海洋鱼类', '珊瑚', 0, -0.7, 0.1),
+  question('animal_pangolin', '穿山甲', '动物', '全身覆盖鳞片的哺乳动物', '鳞片', 0, 0.5, -0.4),
+  question('animal_alpaca', '羊驼', '动物', '产毛且性情温顺的南美动物', '高原', 0, 0.6, 0.3),
+  question('animal_firefly', '萤火虫', '动物', '腹部能够发光的小型昆虫', '夏夜', 0, -0.2, -0.9),
+  question('food_pineapple', '菠萝', '食物', '外皮带刺的热带水果', '热带', 1, 0.6, 0.2),
+  question('food_porridge', '米粥', '食物', '稻米加水慢煮成的流质主食', '早餐', 1, 0.5, 0.6),
+  question('food_pizza', '披萨', '食物', '带有奶酪和配料的烘烤面饼', '奶酪', 1, -0.1, 0.7),
+  question('food_soymilk', '豆浆', '食物', '黄豆研磨煮制的饮品', '黄豆', 1, 0.7, -0.1),
+  question('food_honey', '蜂蜜', '食物', '蜜蜂酿造的天然甜味食品', '蜂巢', 1, 0.3, 0.8),
+  question('food_popcorn', '爆米花', '食物', '玉米受热膨化而成的零食', '电影', 1, -0.2, 0.5),
+  question('food_lemonade', '柠檬水', '食物', '带酸味的清爽饮品', '酸味', 1, -0.5, 0.4),
+  question('food_roastduck', '烤鸭', '食物', '外皮酥脆的烤制禽类菜肴', '酥皮', 1, 0.2, 0.9),
+  question('job_vet', '兽医', '职业', '为动物诊断和治疗疾病', '宠物', 2, 0.6, 0.1),
+  question('job_judge', '法官', '职业', '在法庭依法审理案件', '法槌', 2, -0.1, 0.7),
+  question('job_astronaut', '宇航员', '职业', '在太空执行任务的专业人员', '飞船', 2, -0.7, -0.5),
+  question('job_photographer', '摄影师', '职业', '使用相机进行影像创作', '快门', 2, -0.4, 0.5),
+  question('job_dentist', '牙医', '职业', '诊治口腔和牙齿疾病', '牙椅', 2, 0.7, 0.3),
+  question('job_translator', '翻译员', '职业', '在不同语言之间转换内容', '语言', 2, -0.3, 0.8),
+  question('job_plumber', '水管工', '职业', '安装和维修供排水管道', '扳手', 2, 0.4, -0.2),
+  question('job_scientist', '科学家', '职业', '通过研究探索自然规律', '实验室', 2, -0.6, 0.4),
+  question('nature_eclipse', '日食', '自然现象', '月球遮挡太阳形成的天文现象', '月影', 3, -0.5, -0.5),
+  question('nature_snowflake', '雪花', '自然现象', '水汽凝华形成的冰晶', '六角', 3, -0.7, 0.4),
+  question('nature_drought', '干旱', '自然现象', '长期少雨导致缺水的现象', '龟裂', 3, 0.6, -0.2),
+  question('nature_monsoon', '季风', '自然现象', '随季节改变方向的大范围风系', '雨季', 3, 0.2, 0.7),
+  question('nature_stalactite', '钟乳石', '自然现象', '洞穴中逐渐沉积形成的石体', '溶洞', 3, 0.7, 0.2),
+  question('nature_quicksand', '流沙', '自然现象', '饱含水分而失去承载力的沙层', '陷落', 3, 0.5, -0.4),
+  question('nature_sunrise', '日出', '自然现象', '太阳从地平线升起的景象', '晨曦', 3, -0.2, 0.6),
+  question('nature_whirlpool', '漩涡', '自然现象', '水体旋转形成的漏斗状流动', '旋转', 3, -0.4, 0.3),
+  question('abstract_empathy', '共情', '抽象概念', '理解并感受他人情绪的能力', '理解', 4, 0.3, 0.8),
+  question('abstract_discipline', '自律', '抽象概念', '主动约束自己并坚持规则', '克制', 4, 0.6, 0.2),
+  question('abstract_regret', '遗憾', '抽象概念', '因未能如愿而产生的惋惜', '错过', 4, -0.4, 0.5),
+  question('abstract_dignity', '尊严', '抽象概念', '值得尊重且不容贬损的价值', '尊重', 4, 0.7, -0.1),
+  question('abstract_inspiration', '灵感', '抽象概念', '突然出现的创造性思路', '顿悟', 4, -0.3, -0.7),
+  question('abstract_tolerance', '宽容', '抽象概念', '理解并接纳不同或过失的态度', '包容', 4, 0.4, 0.7),
+  question('abstract_ambition', '抱负', '抽象概念', '希望成就事业的远大志向', '志向', 4, 0.8, -0.4),
+  question('abstract_serenity', '宁静', '抽象概念', '安定平和而少受扰动的状态', '安详', 4, -0.6, 0.3),
+  question('object_thermos', '保温杯', '日常物品', '用于保持饮品温度的容器', '杯盖', 5, 0.4, 0.6),
+  question('object_stapler', '订书机', '日常物品', '用金属钉装订纸张的工具', '文件', 5, 0.2, 0.8),
+  question('object_flashlight', '手电筒', '日常物品', '便携式手持照明工具', '电池', 5, 0.5, -0.5),
+  question('object_keyboard', '键盘', '日常物品', '向计算机输入文字和指令的设备', '按键', 5, -0.3, -0.7),
+  question('object_suitcase', '行李箱', '日常物品', '旅行时装载随身物品的箱子', '拉杆', 5, 0.6, -0.2),
+  question('object_hairdryer', '吹风机', '日常物品', '吹出热风使头发干燥的电器', '热风', 5, -0.5, 0.5),
+  question('object_chopsticks', '筷子', '日常物品', '夹取食物的一双细长餐具', '餐桌', 5, 0.3, 0.7),
+  question('object_powerbank', '充电宝', '日常物品', '为移动设备补充电量的便携电源', '电量', 5, -0.4, -0.6),
 ] as const;
 
 export function validateQuestionBank(questions: readonly Question[]): string[] {
   const errors: string[] = [];
-  if (questions.length < 100) errors.push('题库至少需要 100 道题。');
+  if (questions.length < 150) errors.push('题库至少需要 150 道题。');
   const categories = new Set<string>();
   const ids = new Set<string>();
   const answers = new Set<string>();
@@ -178,8 +227,8 @@ export function validateQuestionBank(questions: readonly Question[]): string[] {
   }
   if (categories.size !== GAME_CATEGORIES.length) errors.push('题库需要完整覆盖 6 个分类。');
   for (const category of GAME_CATEGORIES) {
-    if (questions.filter((item) => item.category === category).length < 15) {
-      errors.push(`${category}分类至少需要 15 道题。`);
+    if (questions.filter((item) => item.category === category).length < 25) {
+      errors.push(`${category}分类至少需要 25 道题。`);
     }
   }
   return errors;
@@ -197,6 +246,16 @@ export function selectRandomQuestion(
   if (active.length === 0) throw new Error('No active questions are configured.');
   const index = Math.min(active.length - 1, Math.floor(Math.max(0, randomValue) * active.length));
   return active[index];
+}
+
+export function selectDailyQuestion(date: string): Question {
+  const active = QUESTIONS.filter((item) => item.active);
+  let hash = 2166136261;
+  for (const character of date) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return active[(hash >>> 0) % active.length];
 }
 
 export function deterministicVectorForText(text: string, target: Question): readonly number[] {

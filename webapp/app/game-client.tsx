@@ -86,6 +86,7 @@ export default function GameClient() {
   const [latestSequence, setLatestSequence] = useState<number | null>(null);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [stats, setStats] = useState<LocalStats>(EMPTY_STATS);
+  const [feedbackSent, setFeedbackSent] = useState<Set<number>>(new Set());
   const booted = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelAbandonRef = useRef<HTMLButtonElement>(null);
@@ -129,7 +130,28 @@ export default function GameClient() {
       setInput('');
       setSortMode('score');
       setLatestSequence(null);
+      setFeedbackSent(new Set());
       requestAnimationFrame(() => inputRef.current?.focus());
+    } catch (error) {
+      setMessage(getFriendlyError(error));
+    } finally {
+      setLoading(false);
+      setBusy(null);
+    }
+  }, [acceptGame]);
+
+  const createDailyGame = useCallback(async () => {
+    setBusy('new');
+    setMessage('');
+    try {
+      const created = await apiRequest<CreateGameResponse>('/api/games/daily', { method: 'POST', body: '{}' });
+      const nextSession = { gameId: created.game.gameId, resumeToken: created.resumeToken };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
+      setSession(nextSession);
+      acceptGame(created.game);
+      setInput('');
+      setLatestSequence(null);
+      setFeedbackSent(new Set());
     } catch (error) {
       setMessage(getFriendlyError(error));
     } finally {
@@ -174,6 +196,7 @@ export default function GameClient() {
     setMessage('');
     setLatestSequence(null);
     setSortMode('score');
+    setFeedbackSent(new Set());
   }, []);
 
   useEffect(() => {
@@ -296,6 +319,36 @@ export default function GameClient() {
     }
   }
 
+  async function submitFeedback(guess: PublicGuess, direction: 'too_high' | 'too_low') {
+    if (!session || !game) return;
+    try {
+      await apiRequest<{ accepted: true }>(`/api/games/${game.gameId}/feedback`, {
+        method: 'POST', headers: authHeaders(session), body: JSON.stringify({ guess: guess.guess, direction }),
+      });
+      setFeedbackSent((current) => new Set(current).add(guess.sequence));
+      setMessage('感谢反馈，会用于后续校准关联度。');
+    } catch (error) { setMessage(getFriendlyError(error)); }
+  }
+
+  async function shareResult() {
+    if (!game || game.status === 'active') return;
+    const bars = game.guesses.slice(-8).map((item) => scoreBlock(item.score)).join('');
+    const text = [
+      `GuessWord ${game.mode === 'daily' ? `每日挑战 ${game.dailyDate}` : game.category}`,
+      `${game.status === 'won' ? `第 ${game.guessCount} 次猜中` : `挑战结束 · ${game.guessCount} 次猜测`} · 提示 ${game.hintCount}/3`,
+      bars || '还没有猜测',
+      '来试试 AI 联想猜词',
+    ].join('\n');
+    try {
+      const nativeShare = window.isSecureContext && typeof navigator.share === 'function';
+      if (nativeShare) await navigator.share({ title: 'GuessWord', text, url: location.href });
+      else await copyText(text);
+      setMessage(nativeShare ? '战绩已分享。' : '战绩已复制，可以发给朋友了。');
+    } catch (error) {
+      if ((error as Error)?.name !== 'AbortError') setMessage('分享失败，请稍后再试。');
+    }
+  }
+
   return (
     <main className="app-page">
       <div className="app-frame">
@@ -334,6 +387,10 @@ export default function GameClient() {
                 <h1 id="game-title">选择题目分类</h1>
                 <p>每局会从所选分类随机抽取一个隐藏词。</p>
               </div>
+              <button className="daily-challenge" type="button" disabled={busy === 'new'} onClick={() => void createDailyGame()}>
+                <span>每日挑战</span><strong>今天大家猜同一个词</strong>
+              </button>
+              <p className="category-divider"><span>或选择分类练习</span></p>
               <div className="category-grid" role="group" aria-label="题目分类">
                 {GAME_CATEGORIES.map((category) => (
                   <button
@@ -395,6 +452,9 @@ export default function GameClient() {
                   </dl>
                   <button className="primary standalone" type="button" onClick={chooseAnotherCategory}>
                     再玩一局
+                  </button>
+                  <button className="secondary share-result" type="button" onClick={() => void shareResult()}>
+                    分享战绩
                   </button>
                 </section>
               )}
@@ -486,7 +546,7 @@ export default function GameClient() {
                 ) : (
                   <ol className="guess-list" aria-label="有效猜测记录">
                     {orderedGuesses.map((guess) => (
-                      <GuessRow key={guess.sequence} guess={guess} isLatest={guess.sequence === latestSequence} />
+                      <GuessRow key={guess.sequence} guess={guess} isLatest={guess.sequence === latestSequence} feedbackSent={feedbackSent} onFeedback={submitFeedback} />
                     ))}
                   </ol>
                 )}
@@ -515,7 +575,7 @@ export default function GameClient() {
   );
 }
 
-function GuessRow({ guess, isLatest }: { guess: PublicGuess; isLatest: boolean }) {
+function GuessRow({ guess, isLatest, feedbackSent, onFeedback }: { guess: PublicGuess; isLatest: boolean; feedbackSent: Set<number>; onFeedback: (guess: PublicGuess, direction: 'too_high' | 'too_low') => void }) {
   return (
     <li className={`guess-item ${isLatest ? 'latest' : ''}`} data-temperature={guess.temperature}>
       <div className="guess-word-cell">
@@ -535,6 +595,13 @@ function GuessRow({ guess, isLatest }: { guess: PublicGuess; isLatest: boolean }
         >
           <span style={{ width: `${guess.score}%` }} />
         </div>
+        {guess.score < 100 && (
+          <div className="score-feedback" aria-label={`${guess.guess} 评分反馈`}>
+            <span>AI 评分不准？</span>
+            <button type="button" disabled={feedbackSent.has(guess.sequence)} onClick={() => onFeedback(guess, 'too_high')}>偏高</button>
+            <button type="button" disabled={feedbackSent.has(guess.sequence)} onClick={() => onFeedback(guess, 'too_low')}>偏低</button>
+          </div>
+        )}
       </div>
       <strong className="guess-score">{formatScore(guess.score)}%</strong>
     </li>
@@ -549,4 +616,21 @@ function formatDuration(totalSeconds: number): string {
 
 function formatScore(score: number): string {
   return score.toFixed(3);
+}
+
+function scoreBlock(score: number): string {
+  return score >= 80 ? '🟥' : score >= 60 ? '🟧' : score >= 40 ? '🟨' : score >= 20 ? '🟦' : '⬜';
+}
+
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText && window.isSecureContext) return navigator.clipboard.writeText(text);
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.select();
+  const copied = document.execCommand('copy');
+  area.remove();
+  if (!copied) throw new Error('Copy failed');
 }
