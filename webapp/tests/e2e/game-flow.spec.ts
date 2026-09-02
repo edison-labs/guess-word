@@ -22,6 +22,12 @@ test('complete game, recovery, new game, and abandon flow', async ({ page }) => 
   await expect(page.getByRole('heading', { name: '动物 · 猜隐藏词' })).toBeVisible();
   await expect(page.getByLabel('你的猜测')).toBeFocused();
 
+  await page.getByRole('button', { name: '← 首页' }).click();
+  await expect(page.getByRole('heading', { name: '选择题目分类' })).toBeVisible();
+  await expect(page.getByText('动物 · 已猜 0 次')).toBeVisible();
+  await page.getByRole('button', { name: '继续本局' }).click();
+  await expect(page.getByRole('heading', { name: '动物 · 猜隐藏词' })).toBeVisible();
+
   const guessCount = page.locator('.score-grid > div').filter({ hasText: '已猜' }).locator('strong');
   await page.getByLabel('你的猜测').fill('银行');
   await page.getByLabel('你的猜测').press('Enter');
@@ -67,6 +73,8 @@ test('complete game, recovery, new game, and abandon flow', async ({ page }) => 
 
   await expect(page.locator('.result-stats')).not.toContainText('最佳联想');
   await expect(page.locator('.result-stats')).not.toContainText('最接近的一次');
+  await page.getByRole('button', { name: '分享战绩' }).click();
+  await expect(page.locator('.share-message')).toContainText(/正在打开系统分享|正在复制战绩|战绩已|浏览器没有允许自动复制/);
   await page.getByRole('button', { name: '再玩一局' }).click();
   await expect(page.getByRole('heading', { name: '选择题目分类' })).toBeVisible();
   await page.getByRole('button', { name: /^动物/ }).click();

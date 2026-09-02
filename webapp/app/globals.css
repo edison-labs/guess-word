@@ -34,11 +34,13 @@ button, summary { cursor: pointer; }
 .app-frame { width: min(100%, 45rem); margin: 0 auto; }
 .app-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: .85rem; padding: 0 .15rem; }
 
-.brand { display: inline-flex; align-items: center; gap: .65rem; color: var(--ink); text-decoration: none; }
+.brand { display: inline-flex; align-items: center; gap: .65rem; padding: 0; border: 0; background: transparent; color: var(--ink); text-decoration: none; text-align: left; }
 .brand-mark { display: grid; width: 2.45rem; height: 2.45rem; place-items: center; border: 1px solid rgb(121 42 5 / 18%); border-radius: .78rem; background: linear-gradient(145deg, #df681b, var(--accent)); box-shadow: 0 7px 18px rgb(145 54 7 / 20%); color: white; font-weight: 900; transform: rotate(-2deg); }
 .brand-copy { display: grid; line-height: 1.05; }
 .brand-copy strong { font-size: 1.02rem; letter-spacing: -.025em; }
 .brand-copy small { margin-top: .28rem; color: #77716a; font-size: .68rem; font-weight: 700; letter-spacing: .08em; }
+.header-actions { display: flex; align-items: center; gap: .5rem; }
+.home-link { min-height: 44px; padding: 0 .8rem; border: 1px solid var(--line); border-radius: .75rem; background: rgb(255 253 249 / 82%); color: var(--accent-dark); font-size: .76rem; font-weight: 800; }
 
 .rules { position: relative; }
 .rules summary { min-height: 44px; display: grid; place-items: center; padding: 0 .95rem; border: 1px solid var(--line); border-radius: .75rem; background: rgb(255 253 249 / 82%); box-shadow: 0 3px 12px rgb(65 45 28 / 5%); font-weight: 780; list-style: none; backdrop-filter: blur(10px); }
@@ -52,6 +54,11 @@ button, summary { cursor: pointer; }
 .category-heading { max-width: 32rem; }
 .category-heading h1 { margin-top: .25rem; }
 .category-heading > p:last-child { margin: .55rem 0 0; color: var(--muted); line-height: 1.55; }
+.resume-game { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin-top: 1.2rem; padding: .85rem 1rem; border: 1px solid #e6c7ae; border-radius: .85rem; background: var(--accent-soft); }
+.resume-game div { display: grid; gap: .2rem; }
+.resume-game span { color: var(--muted); font-size: .65rem; }
+.resume-game strong { font-size: .86rem; }
+.resume-game button { flex: none; min-height: 40px; padding: 0 .8rem; border: 1px solid #c75a1b; border-radius: .58rem; background: var(--surface); color: var(--accent-dark); font-size: .74rem; font-weight: 850; }
 .daily-challenge { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: 100%; min-height: 4.6rem; margin-top: 1.35rem; padding: .9rem 1.1rem; border: 1px solid #b94309; border-radius: .9rem; background: linear-gradient(135deg, #d85d16, #a93808); box-shadow: 0 10px 24px rgb(161 57 6 / 18%); color: white; text-align: left; }
 .daily-challenge span { font-size: 1.12rem; font-weight: 900; }
 .daily-challenge strong { font-size: .75rem; opacity: .86; }
@@ -84,6 +91,8 @@ h1 { margin: 1rem 0 .35rem; font-size: clamp(1.75rem, 7vw, 2.55rem); line-height
 .primary { min-height: 50px; border: 1px solid #a93e07; border-radius: .7rem; padding: 0 1.1rem; background: linear-gradient(180deg, #ce5a17, var(--accent)); box-shadow: 0 6px 14px rgb(161 57 6 / 20%), inset 0 1px 0 rgb(255 255 255 / 18%); color: white; font-weight: 850; }
 .primary.standalone { min-width: 8.5rem; }
 .share-result { min-height: 50px; margin-left: .55rem; border-radius: .7rem; padding: 0 1rem; font-weight: 800; }
+.share-message { margin: .7rem 0 0; color: var(--accent-dark); font-size: .76rem; font-weight: 750; }
+.share-fallback { width: 100%; min-height: 7rem; margin-top: .55rem; padding: .7rem; resize: vertical; border: 1px solid #ddc8b5; border-radius: .6rem; background: white; color: var(--ink); font: inherit; font-size: .72rem; line-height: 1.5; }
 .field-note { margin: .55rem .1rem 0; color: var(--muted); font-size: .75rem; }
 .slow-note { margin: .45rem .1rem 0; color: #8a5a0b; font-size: .78rem; font-weight: 750; }
 .message { min-height: 1.45rem; margin: .45rem .1rem .15rem; color: var(--muted); font-size: .8rem; opacity: .68; }
@@ -173,6 +182,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 @media (max-width: 600px) {
   .app-page { padding: .75rem .65rem 2rem; }
   .app-header { margin-bottom: .65rem; }
+  .home-link { padding-inline: .65rem; }
   .game-shell { padding: 1rem .8rem 1.4rem; border-radius: .9rem; box-shadow: 0 12px 32px rgb(87 55 27 / 9%); }
   .category-picker { min-height: 32rem; align-content: start; padding-top: 1.25rem; }
   .category-grid { grid-template-columns: 1fr 1fr; gap: .55rem; margin-top: 1.15rem; }

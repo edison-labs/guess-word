@@ -30,6 +30,8 @@ const CATEGORY_DESCRIPTIONS: Record<GameCategory, string> = {
   日常物品: '家居、工具与数码用品',
 };
 
+type PendingStart = { kind: 'daily' } | { kind: 'category'; category: GameCategory };
+
 class ApiClientError extends Error {
   constructor(readonly body: ApiErrorBody, readonly status: number) {
     super(body.error.message);
@@ -87,6 +89,10 @@ export default function GameClient() {
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [stats, setStats] = useState<LocalStats>(EMPTY_STATS);
   const [feedbackSent, setFeedbackSent] = useState<Set<number>>(new Set());
+  const [showHome, setShowHome] = useState(false);
+  const [pendingStart, setPendingStart] = useState<PendingStart | null>(null);
+  const [shareMessage, setShareMessage] = useState('');
+  const [shareFallback, setShareFallback] = useState('');
   const booted = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelAbandonRef = useRef<HTMLButtonElement>(null);
@@ -131,6 +137,9 @@ export default function GameClient() {
       setSortMode('score');
       setLatestSequence(null);
       setFeedbackSent(new Set());
+      setShowHome(false);
+      setShareMessage('');
+      setShareFallback('');
       requestAnimationFrame(() => inputRef.current?.focus());
     } catch (error) {
       setMessage(getFriendlyError(error));
@@ -152,6 +161,9 @@ export default function GameClient() {
       setInput('');
       setLatestSequence(null);
       setFeedbackSent(new Set());
+      setShowHome(false);
+      setShareMessage('');
+      setShareFallback('');
     } catch (error) {
       setMessage(getFriendlyError(error));
     } finally {
@@ -197,6 +209,9 @@ export default function GameClient() {
     setLatestSequence(null);
     setSortMode('score');
     setFeedbackSent(new Set());
+    setShowHome(true);
+    setShareMessage('');
+    setShareFallback('');
   }, []);
 
   useEffect(() => {
@@ -205,6 +220,12 @@ export default function GameClient() {
     setStats(parseLocalStats(localStorage.getItem(STATS_KEY)));
     void bootGame();
   }, [bootGame]);
+
+  useEffect(() => {
+    if (loading || showHome || busy || game?.status !== 'active') return;
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [busy, game?.gameId, game?.status, loading, showHome]);
 
   useEffect(() => {
     if (!confirmAbandon) return;
@@ -319,6 +340,41 @@ export default function GameClient() {
     }
   }
 
+  function goHome() {
+    setShowHome(true);
+    setMessage('');
+  }
+
+  function requestStart(target: PendingStart) {
+    if (game?.status === 'active' && session) {
+      setPendingStart(target);
+      return;
+    }
+    if (target.kind === 'daily') void createDailyGame();
+    else void createNewGame(target.category);
+  }
+
+  async function confirmStartNewGame() {
+    if (!pendingStart || !session || !game || game.status !== 'active') return;
+    const target = pendingStart;
+    setPendingStart(null);
+    setBusy('new');
+    setMessage('');
+    try {
+      const result = await apiRequest<GameResponse>(`/api/games/${game.gameId}/abandon`, {
+        method: 'POST',
+        headers: authHeaders(session),
+      });
+      acceptGame(result.game);
+      localStorage.removeItem(SESSION_KEY);
+      if (target.kind === 'daily') await createDailyGame();
+      else await createNewGame(target.category);
+    } catch (error) {
+      setMessage(getFriendlyError(error));
+      setBusy(null);
+    }
+  }
+
   async function submitFeedback(guess: PublicGuess, direction: 'too_high' | 'too_low') {
     if (!session || !game) return;
     try {
@@ -337,15 +393,23 @@ export default function GameClient() {
       `GuessWord ${game.mode === 'daily' ? `每日挑战 ${game.dailyDate}` : game.category}`,
       `${game.status === 'won' ? `第 ${game.guessCount} 次猜中` : `挑战结束 · ${game.guessCount} 次猜测`} · 提示 ${game.hintCount}/3`,
       bars || '还没有猜测',
-      '来试试 AI 联想猜词',
+      `来试试 AI 联想猜词：${location.href}`,
     ].join('\n');
+    setShareMessage('');
+    setShareFallback('');
     try {
       const nativeShare = window.isSecureContext && typeof navigator.share === 'function';
+      setShareMessage(nativeShare ? '正在打开系统分享…' : '正在复制战绩…');
       if (nativeShare) await navigator.share({ title: 'GuessWord', text, url: location.href });
       else await copyText(text);
-      setMessage(nativeShare ? '战绩已分享。' : '战绩已复制，可以发给朋友了。');
+      setShareMessage(nativeShare ? '战绩已分享。' : '战绩已复制，可以粘贴给朋友了。');
     } catch (error) {
-      if ((error as Error)?.name !== 'AbortError') setMessage('分享失败，请稍后再试。');
+      if ((error as Error)?.name === 'AbortError') {
+        setShareMessage('已取消分享。');
+      } else {
+        setShareMessage('浏览器没有允许自动复制，请长按或全选下方内容。');
+        setShareFallback(text);
+      }
     }
   }
 
@@ -353,25 +417,30 @@ export default function GameClient() {
     <main className="app-page">
       <div className="app-frame">
         <header className="app-header">
-          <a className="brand" href="#game" aria-label="GuessWord 首页">
+          <button className="brand" type="button" onClick={goHome} aria-label="返回 GuessWord 首页">
             <span aria-hidden="true" className="brand-mark">猜</span>
             <span className="brand-copy">
               <strong>GuessWord</strong>
               <small>AI 联想猜词</small>
             </span>
-          </a>
-          <details className="rules">
-            <summary>怎么玩</summary>
-            <div className="rules-card">
-              <strong>根据语义关联强弱寻找隐藏词</strong>
-              <p>
-                {game?.scoringMode !== 'test'
-                  ? '输入 1～10 个汉字。AI 语义关联度越高，通常越接近答案；精确猜中为 100%。'
-                  : '输入 1～10 个汉字，根据页面返回的测试关联度逐步尝试；精确猜中为 100%。'}
-              </p>
-              <p>每局可依次使用三条提示：字数、子类别和高关联参考词。</p>
-            </div>
-          </details>
+          </button>
+          <div className="header-actions">
+            {game && !showHome && (
+              <button className="home-link" type="button" onClick={goHome}>← 首页</button>
+            )}
+            <details className="rules">
+              <summary>怎么玩</summary>
+              <div className="rules-card">
+                <strong>根据语义关联强弱寻找隐藏词</strong>
+                <p>
+                  {game?.scoringMode !== 'test'
+                    ? '输入 1～10 个汉字。AI 语义关联度越高，通常越接近答案；精确猜中为 100%。'
+                    : '输入 1～10 个汉字，根据页面返回的测试关联度逐步尝试；精确猜中为 100%。'}
+                </p>
+                <p>每局可依次使用三条提示：字数、子类别和高关联参考词。</p>
+              </div>
+            </details>
+          </div>
         </header>
 
         <section id="game" className="game-shell" aria-label="猜词游戏">
@@ -380,14 +449,20 @@ export default function GameClient() {
               <span className="loader" aria-hidden="true" />
               <p>正在准备新词…</p>
             </div>
-          ) : !game ? (
+          ) : !game || showHome ? (
             <div className="category-picker">
               <div className="category-heading">
                 <p className="section-kicker">开始新一局</p>
                 <h1 id="game-title">选择题目分类</h1>
                 <p>每局会从所选分类随机抽取一个隐藏词。</p>
               </div>
-              <button className="daily-challenge" type="button" disabled={busy === 'new'} onClick={() => void createDailyGame()}>
+              {game?.status === 'active' && (
+                <section className="resume-game" aria-label="当前进行中的游戏">
+                  <div><span>当前进度</span><strong>{game.mode === 'daily' ? '每日挑战' : game.category} · 已猜 {game.guessCount} 次</strong></div>
+                  <button type="button" onClick={() => setShowHome(false)}>继续本局</button>
+                </section>
+              )}
+              <button className="daily-challenge" type="button" disabled={busy === 'new'} onClick={() => requestStart({ kind: 'daily' })}>
                 <span>每日挑战</span><strong>今天大家猜同一个词</strong>
               </button>
               <p className="category-divider"><span>或选择分类练习</span></p>
@@ -398,7 +473,7 @@ export default function GameClient() {
                     className="category-option"
                     type="button"
                     disabled={busy === 'new'}
-                    onClick={() => void createNewGame(category)}
+                    onClick={() => requestStart({ kind: 'category', category })}
                   >
                     <strong>{category}</strong>
                     <span>{CATEGORY_DESCRIPTIONS[category]}</span>
@@ -456,6 +531,16 @@ export default function GameClient() {
                   <button className="secondary share-result" type="button" onClick={() => void shareResult()}>
                     分享战绩
                   </button>
+                  {shareMessage && <p className="share-message" role="status">{shareMessage}</p>}
+                  {shareFallback && (
+                    <textarea
+                      className="share-fallback"
+                      aria-label="可复制的战绩文本"
+                      readOnly
+                      value={shareFallback}
+                      onFocus={(event) => event.currentTarget.select()}
+                    />
+                  )}
                 </section>
               )}
 
@@ -567,6 +652,22 @@ export default function GameClient() {
             <div className="dialog-actions">
               <button ref={cancelAbandonRef} className="secondary" type="button" onClick={closeAbandonDialog}>继续猜</button>
               <button ref={confirmAbandonRef} className="danger" type="button" onClick={() => void abandonGame()}>结束并查看</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {pendingStart && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setPendingStart(null);
+        }}>
+          <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="switch-title" aria-describedby="switch-description">
+            <p className="section-kicker">当前还有一局进行中</p>
+            <h2 id="switch-title">放弃当前进度并开始新题？</h2>
+            <p id="switch-description">当前猜词记录会结算为未猜中，之后不能继续。</p>
+            <div className="dialog-actions">
+              <button className="secondary" type="button" onClick={() => setPendingStart(null)}>取消</button>
+              <button className="danger" type="button" onClick={() => void confirmStartNewGame()}>放弃并开始</button>
             </div>
           </section>
         </div>
