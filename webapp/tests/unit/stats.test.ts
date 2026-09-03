@@ -8,6 +8,7 @@ function completedGame(overrides: Partial<PublicGame> = {}): PublicGame {
     status: 'won',
     scoringMode: 'test',
     category: '动物',
+    answerLength: 2,
     startedAt: new Date(0).toISOString(),
     endedAt: new Date(10_000).toISOString(),
     durationSeconds: 10,
@@ -51,6 +52,53 @@ describe('local statistics', () => {
       stats = recordCompletedGame(stats, completedGame({ gameId: crypto.randomUUID() }));
     }
     expect(stats.recentGames).toHaveLength(20);
+  });
+
+  it('records the daily date and backfills it into a legacy summary without double-counting', () => {
+    const daily = completedGame({ mode: 'daily', dailyDate: '2026-09-02' });
+    const recorded = recordCompletedGame(structuredClone(EMPTY_STATS), daily);
+    expect(recorded.recentGames[0]).toMatchObject({ mode: 'daily', dailyDate: '2026-09-02' });
+    expect(recorded.lastDailyGame).toMatchObject({ mode: 'daily', dailyDate: '2026-09-02' });
+
+    const legacy = structuredClone(recorded);
+    for (const item of legacy.recentGames) {
+      delete item.mode;
+      delete item.dailyDate;
+    }
+    const backfilled = recordCompletedGame(legacy, daily);
+    expect(backfilled.totalGames).toBe(1);
+    expect(backfilled.wonGames).toBe(1);
+    expect(backfilled.recentGames[0]).toMatchObject({ mode: 'daily', dailyDate: '2026-09-02' });
+    expect(backfilled.lastDailyGame).toMatchObject({ mode: 'daily', dailyDate: '2026-09-02' });
+  });
+
+  it('keeps legacy summaries readable when daily metadata is absent', () => {
+    const summary = recordCompletedGame(EMPTY_STATS, completedGame()).recentGames[0];
+    const legacySummary = structuredClone(summary);
+    delete legacySummary.mode;
+    delete legacySummary.dailyDate;
+    const parsed = parseLocalStats(JSON.stringify({
+      version: 1,
+      totalGames: 1,
+      wonGames: 1,
+      bestGuessCount: 5,
+      recentGames: [legacySummary],
+    }));
+    expect(parsed.recentGames).toHaveLength(1);
+    expect(parsed.recentGames[0].mode).toBeUndefined();
+    expect(parsed.lastDailyGame).toBeNull();
+  });
+
+  it('keeps the last daily result after it leaves the 20-game recent list', () => {
+    let stats = recordCompletedGame(
+      structuredClone(EMPTY_STATS),
+      completedGame({ mode: 'daily', dailyDate: '2026-09-02' }),
+    );
+    for (let index = 0; index < 25; index += 1) {
+      stats = recordCompletedGame(stats, completedGame({ gameId: crypto.randomUUID() }));
+    }
+    expect(stats.recentGames.some((item) => item.mode === 'daily')).toBe(false);
+    expect(stats.lastDailyGame?.dailyDate).toBe('2026-09-02');
   });
 
   it('degrades safely for corrupted or answer-bearing data', () => {

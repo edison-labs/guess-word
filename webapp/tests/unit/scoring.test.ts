@@ -178,9 +178,9 @@ describe('deterministic scoring adapter', () => {
           choices: [{
             message: {
               content: JSON.stringify({
-                meaning: 75.123,
-                context: 80.456,
-                specificity: 65.789,
+                relationship: 75.123,
+                similarity: 80.456,
+                direction: 65.789,
               }),
             },
           }],
@@ -192,10 +192,11 @@ describe('deterministic scoring adapter', () => {
       apiKey: 'deepseek-server-secret',
       model: 'deepseek-v4-flash',
     });
+    expect(scorer.cacheNamespace).toBe('deepseek:deepseek-v4-flash:v5');
     const question = getQuestionById('animal_penguin')!;
 
-    expect(await scorer.scoreNonExact('海豹', question)).toBe(74_923);
-    expect(await scorer.scoreNonExact('海豹', question)).toBe(74_923);
+    expect(await scorer.scoreNonExact('海豹', question)).toBe(75_123);
+    expect(await scorer.scoreNonExact('海豹', question)).toBe(75_123);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('https://api.deepseek.com/chat/completions');
     expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
@@ -215,7 +216,13 @@ describe('deterministic scoring adapter', () => {
       thinking: { type: 'disabled' },
       temperature: 0,
     });
-    expect(JSON.parse(request.messages[1].content)).toEqual({ target: '企鹅', guess: '海豹' });
+    expect(request.messages[0].content).toContain('同属一个宽泛类别但用途不同为 10～30');
+    expect(JSON.parse(request.messages[1].content)).toEqual({
+      target: '企鹅',
+      targetCategory: '动物',
+      targetDescription: '生活在寒冷地区的鸟类',
+      guess: '海豹',
+    });
   });
 
   it('classifies DeepSeek auth and temporary failures without exposing responses', async () => {
@@ -249,7 +256,7 @@ describe('deterministic scoring adapter', () => {
         Response.json({
           choices: [{
             message: {
-              content: JSON.stringify({ meaning: 101, context: 80, specificity: 65 }),
+              content: JSON.stringify({ relationship: 101, similarity: 80, direction: 65 }),
             },
           }],
         }),

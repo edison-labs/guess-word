@@ -28,6 +28,8 @@ const CATEGORY_DESCRIPTIONS: Record<GameCategory, string> = {
   自然现象: '天气、地貌与天文现象',
   抽象概念: '情感、品质与思想',
   日常物品: '家居、工具与数码用品',
+  历史人物: '古代人物与近代先贤',
+  体育圈: '运动员、教练与体坛名将',
 };
 
 type PendingStart = { kind: 'daily' } | { kind: 'category'; category: GameCategory };
@@ -98,6 +100,18 @@ export default function GameClient() {
   const cancelAbandonRef = useRef<HTMLButtonElement>(null);
   const confirmAbandonRef = useRef<HTMLButtonElement>(null);
   const abandonButtonRef = useRef<HTMLButtonElement>(null);
+  const todayDate = getChinaDate(new Date());
+  const currentTodayDaily =
+    game?.mode === 'daily' && game.dailyDate === todayDate && game.status !== 'active'
+      ? game
+      : null;
+  const storedTodayDaily =
+    stats.lastDailyGame?.dailyDate === todayDate
+      ? stats.lastDailyGame
+      : stats.recentGames.find((item) => item.mode === 'daily' && item.dailyDate === todayDate);
+  const todayDailyResult = currentTodayDaily ?? storedTodayDaily ?? null;
+  const activeTodayDaily =
+    game?.mode === 'daily' && game.dailyDate === todayDate && game.status === 'active';
 
   const closeAbandonDialog = useCallback(() => {
     setConfirmAbandon(false);
@@ -201,9 +215,6 @@ export default function GameClient() {
   }, [acceptGame]);
 
   const chooseAnotherCategory = useCallback(() => {
-    localStorage.removeItem(SESSION_KEY);
-    setSession(null);
-    setGame(null);
     setInput('');
     setMessage('');
     setLatestSequence(null);
@@ -274,7 +285,7 @@ export default function GameClient() {
     }
 
     setBusy('guess');
-    setMessage('正在计算关联度…');
+    setMessage('正在分析词语关系…');
     setSlow(false);
     const slowTimer = window.setTimeout(() => setSlow(true), 3_000);
     try {
@@ -290,7 +301,7 @@ export default function GameClient() {
       setMessage(
         newest
           ? `${newest.guess}：${formatScore(newest.score)}%，${newest.temperature}`
-          : '关联度已更新。',
+          : '关系分已更新。',
       );
       requestAnimationFrame(() => inputRef.current?.focus());
     } catch (error) {
@@ -346,6 +357,14 @@ export default function GameClient() {
   }
 
   function requestStart(target: PendingStart) {
+    if (target.kind === 'daily' && todayDailyResult) {
+      setMessage('今天的每日挑战已经完成，战绩已保存在上方。明天再来！');
+      return;
+    }
+    if (target.kind === 'daily' && activeTodayDaily) {
+      setShowHome(false);
+      return;
+    }
     if (game?.status === 'active' && session) {
       setPendingStart(target);
       return;
@@ -382,7 +401,7 @@ export default function GameClient() {
         method: 'POST', headers: authHeaders(session), body: JSON.stringify({ guess: guess.guess, direction }),
       });
       setFeedbackSent((current) => new Set(current).add(guess.sequence));
-      setMessage('感谢反馈，会用于后续校准关联度。');
+      setMessage('感谢反馈，会用于后续校准关系分。');
     } catch (error) { setMessage(getFriendlyError(error)); }
   }
 
@@ -431,13 +450,13 @@ export default function GameClient() {
             <details className="rules">
               <summary>怎么玩</summary>
               <div className="rules-card">
-                <strong>根据语义关联强弱寻找隐藏词</strong>
+                <strong>根据词语关系强弱寻找隐藏词</strong>
                 <p>
                   {game?.scoringMode !== 'test'
-                    ? '输入 1～10 个汉字。AI 语义关联度越高，通常越接近答案；精确猜中为 100%。'
-                    : '输入 1～10 个汉字，根据页面返回的测试关联度逐步尝试；精确猜中为 100%。'}
+                    ? '输入 1～10 个汉字。AI 会综合词义、用途、场景、相似点和差异给出关系分；精确猜中为 100%。'
+                    : '输入 1～10 个汉字，根据页面返回的测试关系分逐步尝试；精确猜中为 100%。'}
                 </p>
-                <p>每局可依次使用三条提示：字数、子类别和高关联参考词。</p>
+                <p>答案字数会直接显示；每局还可依次使用范围、参考词和开头字三条提示。</p>
               </div>
             </details>
           </div>
@@ -456,15 +475,41 @@ export default function GameClient() {
                 <h1 id="game-title">选择题目分类</h1>
                 <p>每局会从所选分类随机抽取一个隐藏词。</p>
               </div>
-              {game?.status === 'active' && (
+              {game?.status === 'active' && !activeTodayDaily && (
                 <section className="resume-game" aria-label="当前进行中的游戏">
-                  <div><span>当前进度</span><strong>{game.mode === 'daily' ? '每日挑战' : game.category} · 已猜 {game.guessCount} 次</strong></div>
+                  <div><span>当前进度</span><strong>{game.mode === 'daily' ? '未完成的每日挑战' : game.category} · 已猜 {game.guessCount} 次</strong></div>
                   <button type="button" onClick={() => setShowHome(false)}>继续本局</button>
                 </section>
               )}
-              <button className="daily-challenge" type="button" disabled={busy === 'new'} onClick={() => requestStart({ kind: 'daily' })}>
-                <span>每日挑战</span><strong>今天大家猜同一个词</strong>
-              </button>
+              {activeTodayDaily ? (
+                <button className="daily-challenge daily-active" type="button" onClick={() => setShowHome(false)}>
+                  <span>今日挑战进行中</span><strong>已猜 {game.guessCount} 次 · 继续挑战</strong>
+                </button>
+              ) : todayDailyResult ? (
+                <section className={`daily-result ${todayDailyResult.status}`} aria-label="今日挑战结果">
+                  <div className="daily-result-heading">
+                    <div>
+                      <span>今日挑战已完成</span>
+                      <strong>{todayDailyResult.status === 'won' ? '挑战成功' : '今日已结束'}</strong>
+                    </div>
+                    <span className="daily-result-badge">{todayDailyResult.status === 'won' ? '猜中' : '已揭晓'}</span>
+                  </div>
+                  <dl className="daily-result-stats">
+                    <div><dt>猜测</dt><dd>{todayDailyResult.guessCount} 次</dd></div>
+                    <div><dt>用时</dt><dd>{formatDuration(todayDailyResult.durationSeconds ?? 0)}</dd></div>
+                    <div><dt>提示</dt><dd>{todayDailyResult.hintCount}/3</dd></div>
+                  </dl>
+                  {currentTodayDaily && (
+                    <button className="daily-result-link" type="button" onClick={() => setShowHome(false)}>
+                      查看完整结果
+                    </button>
+                  )}
+                </section>
+              ) : (
+                <button className="daily-challenge" type="button" disabled={busy === 'new'} onClick={() => requestStart({ kind: 'daily' })}>
+                  <span>每日挑战</span><strong>今天大家猜同一个词</strong>
+                </button>
+              )}
               <p className="category-divider"><span>或选择分类练习</span></p>
               <div className="category-grid" role="group" aria-label="题目分类">
                 {GAME_CATEGORIES.map((category) => (
@@ -491,6 +536,9 @@ export default function GameClient() {
           ) : (
             <>
               <div className="game-topline">
+                <span className={`scoring-label ${game.scoringMode}`}>
+                  {game.scoringMode === 'semantic' ? 'AI 关系评分' : '测试评分'}
+                </span>
                 <div className="local-record" aria-label="本地战绩">
                   <span>本机猜中 {stats.wonGames}/{stats.totalGames}</span>
                   <span>最佳 {stats.bestGuessCount ?? '—'} 次</span>
@@ -499,12 +547,11 @@ export default function GameClient() {
 
               {game.status === 'active' && (
                 <>
-                  <div className={`scoring-notice ${game.scoringMode}`}>
-                    <strong>{game.scoringMode === 'semantic' ? 'AI 语义评分' : '测试评分'}</strong>
-                    <span>{game.scoringMode === 'semantic' ? '关联度表示词义接近程度，不是答案概率。' : '仅用于演示游戏流程。'}</span>
+                  <div className="game-title-row">
+                    <h1 id="game-title">{game.category} · 猜隐藏词</h1>
+                    <span className="answer-length">目标 {game.answerLength} 个字</span>
                   </div>
-                  <h1 id="game-title">{game.category} · 猜隐藏词</h1>
-                  <p className="intro">输入一个中文词，根据关联度逐步接近答案。</p>
+                  <p className="intro">从词义、用途、场景和相似点逐步接近答案。</p>
                 </>
               )}
 
@@ -566,7 +613,7 @@ export default function GameClient() {
                   </div>
                   <p id="guess-note" className="field-note">
                     {game.scoringMode === 'semantic'
-                      ? '数值越高，语义关联通常越强；关联度不是答案概率。'
+                      ? '综合关系分越高越接近；相关但不同类的词也会获得有效分数。'
                       : '预置测试词用于展示关联层次；其他分数仅用于演示流程。'}
                   </p>
                   {slow && <p className="slow-note">还在认真计算，请再等一下…</p>}
@@ -575,14 +622,11 @@ export default function GameClient() {
 
               {game.status === 'active' && (
                 <>
-                  <p id="game-message" className={`message ${message ? 'visible' : ''}`} aria-live="polite" aria-atomic="true">
-                    {message || '\u00a0'}
-                  </p>
+                  {message && <p id="game-message" className="message visible" aria-live="polite" aria-atomic="true">{message}</p>}
 
                   <div className="score-grid" aria-label="游戏概况">
                     <div><span>当前最佳</span><strong>{game.bestGuess ? `${formatScore(game.bestGuess.score)}%` : '—'}</strong></div>
                     <div><span>已猜</span><strong>{game.guessCount} 次</strong></div>
-                    <div><span>提示</span><strong>{game.hintCount} / 3</strong></div>
                   </div>
 
                   {game.revealedHints.length > 0 && (
@@ -598,12 +642,13 @@ export default function GameClient() {
 
                   <div className="actions">
                     <button
-                      className="secondary"
+                      className="hint-action"
                       type="button"
                       disabled={Boolean(busy) || game.hintCount >= 3}
                       onClick={() => void requestHint()}
                     >
-                      {game.hintCount >= 3 ? '提示已用完' : busy === 'hint' ? '正在揭示…' : `获取第 ${game.hintCount + 1} 条提示`}
+                      <span aria-hidden="true">💡</span>
+                      {game.hintCount >= 3 ? '提示已用完' : busy === 'hint' ? '正在揭示…' : `获取提示 ${game.hintCount + 1}/3`}
                     </button>
                     <button ref={abandonButtonRef} className="reveal" type="button" disabled={Boolean(busy)} onClick={() => setConfirmAbandon(true)}>
                       查看答案
@@ -614,12 +659,9 @@ export default function GameClient() {
 
               <section className="history" aria-labelledby="history-title">
                 <div className="section-heading">
-                  <div>
-                    <h2 id="history-title">本局猜词榜</h2>
-                    <p className="history-count">已猜 {game.guessCount} 次</p>
-                  </div>
+                  <h2 id="history-title">本局猜词榜</h2>
                   <div className="sort-tabs" aria-label="排序方式">
-                    <button aria-pressed={sortMode === 'score'} type="button" onClick={() => setSortMode('score')}>按关联度</button>
+                    <button aria-pressed={sortMode === 'score'} type="button" onClick={() => setSortMode('score')}>按关系分</button>
                     <button aria-pressed={sortMode === 'time'} type="button" onClick={() => setSortMode('time')}>按时间</button>
                   </div>
                 </div>
@@ -689,7 +731,7 @@ function GuessRow({ guess, isLatest, feedbackSent, onFeedback }: { guess: Public
         <div
           className="score-progress"
           role="progressbar"
-          aria-label={`${guess.guess} 的关联度`}
+          aria-label={`${guess.guess} 的关系分`}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={guess.score}
@@ -713,6 +755,15 @@ function formatDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return minutes > 0 ? `${minutes} 分 ${seconds} 秒` : `${seconds} 秒`;
+}
+
+function getChinaDate(date: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
 }
 
 function formatScore(score: number): string {

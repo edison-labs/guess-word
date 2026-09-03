@@ -151,7 +151,7 @@ export class GameService {
             isConfigurationError ? 'CONFIGURATION_ERROR' : 'SCORER_UNAVAILABLE',
             isConfigurationError
               ? 'AI 语义评分配置不可用，请检查服务端配置。'
-              : 'AI 暂时无法计算关联度，请稍后重试。',
+              : 'AI 暂时无法计算关系分，请稍后重试。',
             503,
             retryable,
             'guess',
@@ -262,6 +262,7 @@ export class GameService {
       mode: game.mode ?? 'random',
       ...(game.dailyDate ? { dailyDate: game.dailyDate } : {}),
       category: question.category,
+      answerLength: question.length,
       startedAt: new Date(game.startedAt).toISOString(),
       ...(endedAt === undefined
         ? {}
@@ -297,9 +298,9 @@ function toPublicGuess(record: GuessRecord): PublicGuess {
 
 function buildHints(question: Question): PublicHint[] {
   return [
-    { level: 1, label: '字数', value: `${question.length} 个汉字` },
-    { level: 2, label: '更具体的范围', value: question.subcategory },
-    { level: 3, label: '高关联参考词', value: question.hotHint },
+    { level: 1, label: '更具体的范围', value: question.subcategory },
+    { level: 2, label: '高关联参考词', value: question.hotHint },
+    { level: 3, label: '开头字', value: Array.from(question.answer)[0] },
   ];
 }
 

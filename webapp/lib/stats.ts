@@ -3,6 +3,8 @@ import type { PublicGame } from './contracts';
 export type LocalGameSummary = {
   gameId: string;
   category: string;
+  mode?: 'random' | 'daily';
+  dailyDate?: string;
   status: 'won' | 'abandoned';
   guessCount: number;
   hintCount: number;
@@ -16,6 +18,7 @@ export type LocalStats = {
   totalGames: number;
   wonGames: number;
   bestGuessCount: number | null;
+  lastDailyGame: LocalGameSummary | null;
   recentGames: LocalGameSummary[];
 };
 
@@ -24,6 +27,7 @@ export const EMPTY_STATS: LocalStats = {
   totalGames: 0,
   wonGames: 0,
   bestGuessCount: null,
+  lastDailyGame: null,
   recentGames: [],
 };
 
@@ -51,6 +55,12 @@ export function parseLocalStats(raw: string | null): LocalStats {
         (Number.isInteger(parsed.bestGuessCount) && (parsed.bestGuessCount ?? 0) > 0)
           ? parsed.bestGuessCount ?? null
           : null,
+      lastDailyGame:
+        isSafeSummary(parsed.lastDailyGame) &&
+        parsed.lastDailyGame.mode === 'daily' &&
+        parsed.lastDailyGame.dailyDate
+          ? parsed.lastDailyGame
+          : recentGames.find((item) => item.mode === 'daily' && item.dailyDate) ?? null,
       recentGames,
     };
   } catch {
@@ -64,6 +74,9 @@ function isSafeSummary(value: unknown): value is LocalGameSummary {
   return (
     typeof item.gameId === 'string' &&
     typeof item.category === 'string' &&
+    (item.mode === undefined || item.mode === 'random' || item.mode === 'daily') &&
+    (item.dailyDate === undefined ||
+      (typeof item.dailyDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dailyDate))) &&
     (item.status === 'won' || item.status === 'abandoned') &&
     Number.isInteger(item.guessCount) &&
     Number.isInteger(item.hintCount) &&
@@ -77,13 +90,37 @@ export function recordCompletedGame(stats: LocalStats, game: PublicGame): LocalS
   if (game.status === 'active' || !game.endedAt || game.durationSeconds === undefined) {
     return stats;
   }
-  if (stats.recentGames.some((item) => item.gameId === game.gameId)) {
-    return stats;
+  const existingIndex = stats.recentGames.findIndex((item) => item.gameId === game.gameId);
+  if (existingIndex >= 0) {
+    const existing = stats.recentGames[existingIndex];
+    const mode = game.mode ?? existing.mode;
+    const dailyDate = game.dailyDate ?? existing.dailyDate;
+    const shouldRememberDaily = mode === 'daily' && Boolean(dailyDate);
+    if (
+      existing.mode === mode &&
+      existing.dailyDate === dailyDate &&
+      (!shouldRememberDaily || stats.lastDailyGame?.gameId === game.gameId)
+    ) return stats;
+
+    const recentGames = [...stats.recentGames];
+    const enriched = {
+      ...existing,
+      ...(mode ? { mode } : {}),
+      ...(dailyDate ? { dailyDate } : {}),
+    };
+    recentGames[existingIndex] = enriched;
+    return {
+      ...stats,
+      lastDailyGame: shouldRememberDaily ? enriched : stats.lastDailyGame,
+      recentGames,
+    };
   }
 
   const summary: LocalGameSummary = {
     gameId: game.gameId,
     category: game.category,
+    mode: game.mode ?? 'random',
+    ...(game.dailyDate ? { dailyDate: game.dailyDate } : {}),
     status: game.status,
     guessCount: game.guessCount,
     hintCount: game.hintCount,
@@ -101,6 +138,7 @@ export function recordCompletedGame(stats: LocalStats, game: PublicGame): LocalS
         ? game.guessCount
         : Math.min(stats.bestGuessCount, game.guessCount)
       : stats.bestGuessCount,
+    lastDailyGame: summary.mode === 'daily' && summary.dailyDate ? summary : stats.lastDailyGame,
     recentGames: [summary, ...stats.recentGames].slice(0, 20),
   };
 }

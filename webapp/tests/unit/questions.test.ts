@@ -3,8 +3,8 @@ import { GAME_CATEGORIES } from '../../lib/contracts';
 import { QUESTIONS, selectDailyQuestion, selectRandomQuestion, validateQuestionBank } from '../../lib/server/questions';
 
 describe('question bank', () => {
-  it('contains at least 150 valid and balanced questions across all categories', () => {
-    expect(QUESTIONS.length).toBeGreaterThanOrEqual(150);
+  it('contains at least 25 valid questions in every supported category', () => {
+    expect(QUESTIONS.length).toBeGreaterThanOrEqual(GAME_CATEGORIES.length * 25);
     expect(new Set(QUESTIONS.map((item) => item.category))).toEqual(new Set(GAME_CATEGORIES));
     for (const category of GAME_CATEGORIES) {
       expect(QUESTIONS.filter((item) => item.category === category).length).toBeGreaterThanOrEqual(25);

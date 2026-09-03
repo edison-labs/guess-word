@@ -9,6 +9,8 @@ export const GAME_CATEGORIES = [
   '自然现象',
   '抽象概念',
   '日常物品',
+  '历史人物',
+  '体育圈',
 ] as const;
 
 export type GameCategory = (typeof GAME_CATEGORIES)[number];
@@ -47,6 +49,7 @@ export type PublicGame = {
   mode?: GameMode;
   dailyDate?: string;
   category: GameCategory;
+  answerLength: number;
   startedAt: string;
   endedAt?: string;
   durationSeconds?: number;

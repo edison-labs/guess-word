@@ -96,12 +96,13 @@ describe('game service integration', () => {
     const { service } = createTestHarness();
     const created = await service.createGame('动物');
     const first = await service.useHint(created.game.gameId, created.resumeToken);
-    expect(first.revealedHints).toEqual([{ level: 1, label: '字数', value: '2 个汉字' }]);
+    expect(first.revealedHints).toEqual([{ level: 1, label: '更具体的范围', value: '生活在寒冷地区的鸟类' }]);
     const second = await service.useHint(created.game.gameId, created.resumeToken);
     expect(second.revealedHints).toHaveLength(2);
     expect(second.revealedHints[1]).toMatchObject({ level: 2 });
     const third = await service.useHint(created.game.gameId, created.resumeToken);
-    expect(third.revealedHints[2]).toEqual({ level: 3, label: '高关联参考词', value: '南极' });
+    expect(second.revealedHints[1]).toEqual({ level: 2, label: '高关联参考词', value: '南极' });
+    expect(third.revealedHints[2]).toEqual({ level: 3, label: '开头字', value: '企' });
     await expect(service.useHint(created.game.gameId, created.resumeToken)).rejects.toMatchObject({
       code: 'HINTS_EXHAUSTED',
     });

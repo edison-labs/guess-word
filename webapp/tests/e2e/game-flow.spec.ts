@@ -52,10 +52,10 @@ test('complete game, recovery, new game, and abandon flow', async ({ page }) => 
   await expect(page.getByText('这个词已经猜过了。')).toBeVisible();
   await expect(guessCount).toHaveText('2 次');
 
-  await page.getByRole('button', { name: '获取第 1 条提示' }).click();
-  await expect(page.getByText('2 个汉字')).toBeVisible();
+  await page.getByRole('button', { name: /获取提示 1\/3/ }).click();
+  await expect(page.getByText('生活在寒冷地区的鸟类')).toBeVisible();
   await page.reload();
-  await expect(page.getByText('2 个汉字')).toBeVisible();
+  await expect(page.getByText('生活在寒冷地区的鸟类')).toBeVisible();
   await expect(page.getByRole('listitem').filter({ hasText: '银行' })).toBeVisible();
   await expect(guessCount).toHaveText('2 次');
 
@@ -137,4 +137,42 @@ test('validation, keyboard focus, and accessibility states', async ({ page }) =>
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('button', { name: '查看答案' })).toBeFocused();
+});
+
+test('daily challenge becomes a saved result and cannot be started twice', async ({ page }) => {
+  await page.getByRole('button', { name: /每日挑战/ }).click();
+  await expect(page.getByRole('heading', { name: /猜隐藏词/ })).toBeVisible();
+
+  await page.getByRole('button', { name: '查看答案' }).click();
+  await page.getByRole('button', { name: '结束并查看' }).click();
+  await expect(page.getByRole('heading', { name: '答案揭晓' })).toBeVisible();
+
+  await page.getByRole('button', { name: '再玩一局' }).click();
+  const dailyResult = page.getByLabel('今日挑战结果');
+  await expect(dailyResult).toBeVisible();
+  await expect(dailyResult).toContainText('今日挑战已完成');
+  await expect(dailyResult).toContainText('已揭晓');
+  await expect(page.getByRole('button', { name: '每日挑战', exact: true })).toHaveCount(0);
+
+  await page.reload();
+  await page.getByRole('button', { name: '返回 GuessWord 首页' }).click();
+  await expect(page.getByLabel('今日挑战结果')).toBeVisible();
+  await expect(page.getByRole('button', { name: '每日挑战', exact: true })).toHaveCount(0);
+});
+
+test('expanded categories expose word length and a prominent hint action', async ({ page }) => {
+  await expect(page.getByRole('button', { name: /^历史人物/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^体育圈/ })).toBeVisible();
+  await page.getByRole('button', { name: /^历史人物/ }).click();
+
+  await expect(page.getByRole('heading', { name: '历史人物 · 猜隐藏词' })).toBeVisible();
+  await expect(page.getByText(/^目标 [2-4] 个字$/)).toBeVisible();
+  const hintButton = page.getByRole('button', { name: /获取提示 1\/3/ });
+  await expect(hintButton).toBeVisible();
+  await expect(hintButton).toHaveClass(/hint-action/);
+  await hintButton.click();
+  await expect(page.getByRole('list', { name: '已揭示提示' })).toContainText('更具体的范围');
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
 });

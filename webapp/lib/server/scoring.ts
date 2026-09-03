@@ -187,20 +187,21 @@ type DeepSeekJudgeConfig = {
   onUsage?: (record: AiUsageRecord) => Promise<void>;
 };
 
-const DEEPSEEK_SCORING_PROMPT = `你是中文猜词游戏的关联度评审。比较“猜测词”与“目标词”，只输出 JSON：{"meaning":数字,"context":数字,"specificity":数字}。
-三个数字都必须在 0 到 100，并各自保留三位小数，例如 37.284：meaning 衡量词义、类别和概念接近度，宽泛上位类应低于直接类别；context 衡量典型场景、属性、功能和固定搭配的关联；specificity 衡量猜测词能否从众多候选中独特地指向目标。
-无明显关系应接近 0；不要仅因常识共现就把 meaning 判高；必须区分宽泛类别、直接类别和典型场景。使用完整区间，不要习惯性返回整十或以 .000 结尾。小数必须来自你的语义判断，不能使用随机数。不要输出总分、解释、Markdown 或其他字段。相同输入应给出相同分数。`;
+const DEEPSEEK_SCORING_PROMPT = `你是中文联想猜词游戏的关系评审。比较“猜测词”与“目标词”，不仅判断近义程度，也判断两者的功能关系、使用场景、共同属性、外形材料、组成搭配、因果关系，以及通过差异能否提供有效方向。
+只输出 JSON：{"relationship":数字,"similarity":数字,"direction":数字}。三个数字都必须在 0 到 100，并各自保留三位小数：relationship 衡量直接功能、空间、因果、组成或固定搭配关系；similarity 衡量类别、用途、形态、材料和属性的相似点；direction 衡量这个猜测能否通过相似点或明确差异，把玩家带到目标所在的有效范围。
+请按完整区间校准：近义词、别称或极近概念为 75～98；直接功能伙伴、组成物或强场景搭配为 45～75；同一具体子类为 30～60；同属一个宽泛类别但用途不同为 10～30；只共享日常场景或单一属性为 5～20；跨领域且确实找不到关系才为 0～5。只要存在可说清的共同类别、用途、场景或属性，就不要机械返回 0。不同词之间仍要拉开差距，不得把“都属于日常用品”等宽泛关系打成高分。
+使用完整区间，不要习惯性返回整十或以 .000 结尾；小数必须来自语义判断，不能使用随机数。不要输出总分、解释、Markdown 或其他字段。相同输入应给出相同分数。`;
 
 export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
   readonly cacheNamespace: string;
   private readonly resultCache = new Map<string, number>();
 
   constructor(private readonly config: DeepSeekJudgeConfig) {
-    this.cacheNamespace = `deepseek:${config.model}:v4`;
+    this.cacheNamespace = `deepseek:${config.model}:v5`;
   }
 
   async scoreNonExact(normalizedGuess: string, question: Question): Promise<number> {
-    const resultKey = `${this.config.model}:v4:${question.id}:${normalizedGuess}`;
+    const resultKey = `${this.config.model}:v5:${question.id}:${normalizedGuess}`;
     const cached = this.resultCache.get(resultKey);
     if (cached !== undefined) return cached;
 
@@ -220,7 +221,12 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
             { role: 'system', content: DEEPSEEK_SCORING_PROMPT },
             {
               role: 'user',
-              content: JSON.stringify({ target: question.answer, guess: normalizedGuess }),
+              content: JSON.stringify({
+                target: question.answer,
+                targetCategory: question.category,
+                targetDescription: question.subcategory,
+                guess: normalizedGuess,
+              }),
             },
           ],
           response_format: { type: 'json_object' },
@@ -278,12 +284,12 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
         );
       }
       const dimensions = parsed as {
-        meaning?: unknown;
-        context?: unknown;
-        specificity?: unknown;
+        relationship?: unknown;
+        similarity?: unknown;
+        direction?: unknown;
       } | null;
       const values = dimensions
-        ? [dimensions.meaning, dimensions.context, dimensions.specificity]
+        ? [dimensions.relationship, dimensions.similarity, dimensions.direction]
         : [];
       if (values.length !== 3 || values.some(
         (value) =>
@@ -299,11 +305,11 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
         );
       }
 
-      const [meaning, context, specificity] = values as number[];
+      const [relationship, similarity, direction] = values as number[];
       // Fixed weights turn three independent AI judgments into a stable
       // integer representing thousandths of one percentage point.
       const score = capNonExactScore(
-        Math.round((meaning * 0.35 + context * 0.4 + specificity * 0.25) * 1000),
+        Math.round((relationship * 0.45 + similarity * 0.35 + direction * 0.2) * 1000),
       );
       const usage = body.usage;
       if (usage && this.config.onUsage) {

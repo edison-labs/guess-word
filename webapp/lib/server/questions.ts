@@ -12,7 +12,7 @@ export type Question = {
 };
 
 function vector(categoryIndex: number, traitA: number, traitB: number): readonly number[] {
-  const result = [-0.18, -0.18, -0.18, -0.18, -0.18, -0.18, traitA, traitB];
+  const result = [-0.18, -0.18, -0.18, -0.18, -0.18, -0.18, -0.18, -0.18, traitA, traitB];
   result[categoryIndex] = 1;
   return result;
 }
@@ -196,11 +196,64 @@ export const QUESTIONS: readonly Question[] = [
   question('object_hairdryer', '吹风机', '日常物品', '吹出热风使头发干燥的电器', '热风', 5, -0.5, 0.5),
   question('object_chopsticks', '筷子', '日常物品', '夹取食物的一双细长餐具', '餐桌', 5, 0.3, 0.7),
   question('object_powerbank', '充电宝', '日常物品', '为移动设备补充电量的便携电源', '电量', 5, -0.4, -0.6),
+
+  question('history_confucius', '孔子', '历史人物', '春秋时期的思想家和教育家', '儒家', 6, -0.5, 0.8),
+  question('history_mencius', '孟子', '历史人物', '战国时期的儒家思想家', '性善论', 6, -0.4, 0.7),
+  question('history_qin_shihuang', '秦始皇', '历史人物', '完成中国首次大一统的秦朝皇帝', '长城', 6, 0.9, -0.5),
+  question('history_han_wudi', '汉武帝', '历史人物', '开拓汉朝疆域的皇帝', '丝绸之路', 6, 0.8, -0.4),
+  question('history_sima_qian', '司马迁', '历史人物', '西汉时期的史学家', '史记', 6, -0.6, 0.6),
+  question('history_cao_cao', '曹操', '历史人物', '东汉末年的政治家和军事家', '魏国', 6, 0.7, -0.3),
+  question('history_liu_bei', '刘备', '历史人物', '三国时期蜀汉的建立者', '桃园', 6, 0.6, 0.2),
+  question('history_zhuge_liang', '诸葛亮', '历史人物', '三国时期蜀汉丞相', '隆中对', 6, -0.2, 0.9),
+  question('history_li_shimin', '李世民', '历史人物', '开创贞观之治的唐朝皇帝', '贞观', 6, 0.8, 0.1),
+  question('history_wu_zetian', '武则天', '历史人物', '中国历史上的女皇帝', '周朝', 6, 0.7, -0.6),
+  question('history_li_bai', '李白', '历史人物', '唐代浪漫主义诗人', '诗仙', 6, -0.7, 0.5),
+  question('history_du_fu', '杜甫', '历史人物', '唐代现实主义诗人', '诗圣', 6, -0.6, 0.4),
+  question('history_su_shi', '苏轼', '历史人物', '北宋文学家和书画家', '东坡', 6, -0.5, 0.6),
+  question('history_yue_fei', '岳飞', '历史人物', '南宋抗金名将', '精忠报国', 6, 0.8, -0.2),
+  question('history_genghis_khan', '成吉思汗', '历史人物', '蒙古帝国的奠基者', '草原', 6, 0.9, -0.7),
+  question('history_zhu_yuanzhang', '朱元璋', '历史人物', '明朝开国皇帝', '洪武', 6, 0.8, -0.3),
+  question('history_zheng_he', '郑和', '历史人物', '明代率船队远航的航海家', '下西洋', 6, 0.2, 0.8),
+  question('history_wang_yangming', '王阳明', '历史人物', '明代思想家和心学代表', '知行合一', 6, -0.5, 0.9),
+  question('history_kangxi', '康熙', '历史人物', '清朝在位时间很长的皇帝', '盛世', 6, 0.6, -0.1),
+  question('history_qianlong', '乾隆', '历史人物', '清朝中期的皇帝', '下江南', 6, 0.5, -0.2),
+  question('history_lin_zexu', '林则徐', '历史人物', '晚清主张禁烟的政治家', '虎门销烟', 6, 0.4, 0.7),
+  question('history_sun_yat_sen', '孙中山', '历史人物', '中国近代民主革命先行者', '辛亥革命', 6, 0.6, 0.5),
+  question('history_lu_xun', '鲁迅', '历史人物', '中国现代文学的重要作家', '呐喊', 6, -0.7, 0.3),
+  question('history_zhang_qian', '张骞', '历史人物', '西汉出使西域的使者', '西域', 6, 0.2, 0.7),
+  question('history_wang_zhaojun', '王昭君', '历史人物', '汉代出塞和亲的历史人物', '出塞', 6, -0.1, 0.6),
+
+  question('sports_yao_ming', '姚明', '体育圈', '中国男子篮球运动员', 'NBA', 7, 0.8, 0.4),
+  question('sports_liu_xiang', '刘翔', '体育圈', '中国男子跨栏运动员', '栏王', 7, 0.7, -0.3),
+  question('sports_li_na', '李娜', '体育圈', '中国女子网球运动员', '大满贯', 7, 0.4, 0.7),
+  question('sports_su_bingtian', '苏炳添', '体育圈', '中国男子短跑运动员', '百米', 7, 0.8, -0.5),
+  question('sports_gu_ailing', '谷爱凌', '体育圈', '自由式滑雪运动员', '冬奥会', 7, -0.6, 0.7),
+  question('sports_quan_hongchan', '全红婵', '体育圈', '中国女子跳水运动员', '十米台', 7, -0.3, 0.9),
+  question('sports_ma_long', '马龙', '体育圈', '中国男子乒乓球运动员', '全满贯', 7, 0.5, 0.8),
+  question('sports_zhang_jike', '张继科', '体育圈', '中国男子乒乓球运动员', '横板', 7, 0.4, 0.7),
+  question('sports_sun_yingsha', '孙颖莎', '体育圈', '中国女子乒乓球运动员', '国乒', 7, 0.3, 0.8),
+  question('sports_lang_ping', '郎平', '体育圈', '中国排球运动员和教练', '铁榔头', 7, 0.7, 0.5),
+  question('sports_zhu_ting', '朱婷', '体育圈', '中国女子排球运动员', '主攻', 7, 0.6, 0.6),
+  question('sports_guo_jingjing', '郭晶晶', '体育圈', '中国女子跳水运动员', '跳水皇后', 7, -0.2, 0.8),
+  question('sports_lin_dan', '林丹', '体育圈', '中国男子羽毛球运动员', '超级丹', 7, 0.5, 0.4),
+  question('sports_li_ning', '李宁', '体育圈', '中国男子体操运动员', '体操王子', 7, 0.6, -0.1),
+  question('sports_xu_haifeng', '许海峰', '体育圈', '中国男子射击运动员', '首金', 7, -0.2, 0.6),
+  question('sports_deng_yaping', '邓亚萍', '体育圈', '中国女子乒乓球运动员', '小个子', 7, 0.3, 0.7),
+  question('sports_wang_meng', '王濛', '体育圈', '中国女子短道速滑运动员', '冰刀', 7, -0.7, 0.5),
+  question('sports_wu_dajing', '武大靖', '体育圈', '中国男子短道速滑运动员', '短道', 7, -0.8, 0.4),
+  question('sports_zheng_qinwen', '郑钦文', '体育圈', '中国女子网球运动员', '网球', 7, 0.2, 0.7),
+  question('sports_pan_zhanle', '潘展乐', '体育圈', '中国男子游泳运动员', '自由泳', 7, -0.5, 0.6),
+  question('sports_messi', '梅西', '体育圈', '阿根廷男子足球运动员', '世界杯', 7, 0.8, -0.4),
+  question('sports_pele', '贝利', '体育圈', '巴西男子足球运动员', '球王', 7, 0.9, -0.5),
+  question('sports_bryant', '科比', '体育圈', '美国男子篮球运动员', '湖人', 7, 0.8, 0.2),
+  question('sports_jordan', '乔丹', '体育圈', '美国男子篮球运动员', '飞人', 7, 0.9, 0.1),
+  question('sports_bolt', '博尔特', '体育圈', '牙买加男子短跑运动员', '闪电', 7, 0.8, -0.6),
 ] as const;
 
 export function validateQuestionBank(questions: readonly Question[]): string[] {
   const errors: string[] = [];
-  if (questions.length < 150) errors.push('题库至少需要 150 道题。');
+  const minimumQuestions = GAME_CATEGORIES.length * 25;
+  if (questions.length < minimumQuestions) errors.push(`题库至少需要 ${minimumQuestions} 道题。`);
   const categories = new Set<string>();
   const ids = new Set<string>();
   const answers = new Set<string>();
@@ -225,7 +278,7 @@ export function validateQuestionBank(questions: readonly Question[]): string[] {
       errors.push(`${item.id} 的测试向量无效。`);
     }
   }
-  if (categories.size !== GAME_CATEGORIES.length) errors.push('题库需要完整覆盖 6 个分类。');
+  if (categories.size !== GAME_CATEGORIES.length) errors.push(`题库需要完整覆盖 ${GAME_CATEGORIES.length} 个分类。`);
   for (const category of GAME_CATEGORIES) {
     if (questions.filter((item) => item.category === category).length < 25) {
       errors.push(`${category}分类至少需要 25 道题。`);
@@ -260,14 +313,14 @@ export function selectDailyQuestion(date: string): Question {
 
 export function deterministicVectorForText(text: string, target: Question): readonly number[] {
   if (text === target.hotHint) {
-    return target.testVector.map((value, index) => value + (index === 7 ? 0.03 : 0));
+    return target.testVector.map((value, index) => value + (index === target.testVector.length - 1 ? 0.03 : 0));
   }
   const matchingQuestion = QUESTIONS.find(
     (item) => item.answer === text || item.hotHint === text,
   );
   if (matchingQuestion) return matchingQuestion.testVector;
 
-  const categoryIndex = ['动物', '食物', '职业', '自然现象', '抽象概念', '日常物品'].indexOf(text);
+  const categoryIndex = GAME_CATEGORIES.indexOf(text as GameCategory);
   if (categoryIndex >= 0) return vector(categoryIndex, 0, 0);
 
   const semanticLexicon: Record<string, readonly number[]> = {
@@ -284,6 +337,10 @@ export function deterministicVectorForText(text: string, target: Question): read
     精神: vector(4, 0.45, 0),
     工具: vector(5, 0, 0.35),
     家电: vector(5, -0.4, 0.25),
+    古人: vector(6, 0, 0.2),
+    皇帝: vector(6, 0.7, -0.2),
+    运动员: vector(7, 0.4, 0.2),
+    冠军: vector(7, 0.6, 0.4),
     银行: vector(2, -0.7, 0.1),
     汽车: vector(5, 0.1, -0.7),
   };
@@ -329,6 +386,8 @@ const CATEGORY_KEYWORDS: readonly (readonly string[])[] = [
   ['自然', '天气', '气象', '风雨', '雷电', '云层', '天空', '山川', '海洋'],
   ['概念', '情感', '品质', '思想', '心理', '精神', '感觉', '观念'],
   ['物品', '用品', '工具', '家电', '设备', '家具', '器具', '东西'],
+  ['历史', '古代', '古人', '皇帝', '将军', '诗人', '思想家', '名人'],
+  ['体育', '运动', '比赛', '冠军', '球员', '教练', '奥运', '体坛'],
 ] as const;
 
 const CLUE_STOP_CHARACTERS = new Set(
@@ -345,7 +404,7 @@ const CLUE_CHARACTER_FREQUENCY = QUESTIONS.reduce((frequencies, questionItem) =>
   return frequencies;
 }, new Map<string, number>());
 
-const COLD_VECTOR_BASE = [-0.35, -0.25, -0.3, -0.2, -0.28, -0.32, 0.1, -0.1] as const;
+const COLD_VECTOR_BASE = [-0.35, -0.25, -0.3, -0.2, -0.28, -0.32, -0.27, -0.3, 0.1, -0.1] as const;
 
 function hashedColdVector(text: string): readonly number[] {
   // Development/test only: stable jitter prevents every unregistered word
