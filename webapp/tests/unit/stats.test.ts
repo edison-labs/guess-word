@@ -8,7 +8,6 @@ function completedGame(overrides: Partial<PublicGame> = {}): PublicGame {
     status: 'won',
     scoringMode: 'test',
     category: '动物',
-    answerLength: 2,
     startedAt: new Date(0).toISOString(),
     endedAt: new Date(10_000).toISOString(),
     durationSeconds: 10,

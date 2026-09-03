@@ -289,10 +289,10 @@ export class NodeSqliteGameStore implements GameStore {
       const result = this.db.prepare(`
         UPDATE games
         SET hint_count = hint_count + 1
-        WHERE id = ? AND status = 'active' AND hint_count < 3
+        WHERE id = ? AND status = 'active' AND hint_count < 2
         RETURNING hint_count
       `).get(gameId) as { hint_count: number } | undefined;
-      if (result) return result.hint_count as 1 | 2 | 3;
+      if (result) return result.hint_count as 1 | 2;
       const game = this.getGameSync(gameId);
       if (!game) return 'missing';
       return game.status === 'active' ? 'exhausted' : 'finished';

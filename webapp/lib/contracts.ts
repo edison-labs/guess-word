@@ -1,6 +1,7 @@
 export type GameStatus = 'active' | 'won' | 'abandoned';
 export type ScoringMode = 'test' | 'semantic';
 export type GameMode = 'random' | 'daily';
+export const MAX_HINT_COUNT = 2;
 
 export const GAME_CATEGORIES = [
   '动物',
@@ -29,7 +30,7 @@ export type Temperature =
   | '猜中';
 
 export type PublicHint = {
-  level: 1 | 2 | 3;
+  level: 1 | 2;
   label: string;
   value: string;
 };
@@ -50,7 +51,6 @@ export type PublicGame = {
   mode?: GameMode;
   dailyDate?: string;
   category: GameCategory;
-  answerLength: number;
   startedAt: string;
   endedAt?: string;
   durationSeconds?: number;

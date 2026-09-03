@@ -36,7 +36,7 @@ test('complete game, recovery, new game, and abandon flow', async ({ page }) => 
 
   await page.getByLabel('你的猜测').fill('南极');
   await page.getByRole('button', { name: '猜一下' }).click();
-  await expect(page.getByRole('listitem').filter({ hasText: '南极' })).toContainText('非常接近');
+  await expect(page.getByRole('listitem').filter({ hasText: '南极' })).toContainText('含义和指向已经非常接近');
   await expect(guessCount).toHaveText('2 次');
 
   const guessRows = page.getByRole('list', { name: '有效猜测记录' }).getByRole('listitem');
@@ -52,10 +52,10 @@ test('complete game, recovery, new game, and abandon flow', async ({ page }) => 
   await expect(page.getByText('这个词已经猜过了。')).toBeVisible();
   await expect(guessCount).toHaveText('2 次');
 
-  await page.getByRole('button', { name: /获取提示 1\/3/ }).click();
-  await expect(page.getByText('生活在寒冷地区的鸟类')).toBeVisible();
+  await page.getByRole('button', { name: /获取提示 1\/2/ }).click();
+  await expect(page.getByText('先从生活环境、活动方式和外形特征考虑')).toBeVisible();
   await page.reload();
-  await expect(page.getByText('生活在寒冷地区的鸟类')).toBeVisible();
+  await expect(page.getByText('先从生活环境、活动方式和外形特征考虑')).toBeVisible();
   await expect(page.getByRole('listitem').filter({ hasText: '银行' })).toBeVisible();
   await expect(guessCount).toHaveText('2 次');
 
@@ -160,18 +160,21 @@ test('daily challenge becomes a saved result and cannot be started twice', async
   await expect(page.getByRole('button', { name: '每日挑战', exact: true })).toHaveCount(0);
 });
 
-test('expanded categories expose word length and a prominent hint action', async ({ page }) => {
+test('expanded categories hide word length and expose two progressive hints', async ({ page }) => {
   await expect(page.getByRole('button', { name: /^历史人物/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^体育圈/ })).toBeVisible();
   await page.getByRole('button', { name: /^历史人物/ }).click();
 
   await expect(page.getByRole('heading', { name: '历史人物 · 猜隐藏词' })).toBeVisible();
-  await expect(page.getByText(/^目标 [2-4] 个字$/)).toBeVisible();
-  const hintButton = page.getByRole('button', { name: /获取提示 1\/3/ });
+  await expect(page.getByText(/^目标 [2-4] 个字$/)).toHaveCount(0);
+  const hintButton = page.getByRole('button', { name: /获取提示 1\/2/ });
   await expect(hintButton).toBeVisible();
   await expect(hintButton).toHaveClass(/hint-action/);
   await hintButton.click();
-  await expect(page.getByRole('list', { name: '已揭示提示' })).toContainText('更具体的范围');
+  await expect(page.getByRole('list', { name: '已揭示提示' })).toContainText('思考方向');
+  await page.getByRole('button', { name: /获取提示 2\/2/ }).click();
+  await expect(page.getByRole('list', { name: '已揭示提示' })).toContainText('缩小范围');
+  await expect(page.getByRole('button', { name: '提示已用完' })).toBeDisabled();
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);

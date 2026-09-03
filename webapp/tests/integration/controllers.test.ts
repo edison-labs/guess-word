@@ -44,6 +44,7 @@ describe('API controllers', () => {
     expect(serialized).not.toContain('南极');
     expect(body.resumeToken.length).toBeGreaterThan(20);
     expect(body.game.category).toBe('动物');
+    expect(body.game).not.toHaveProperty('answerLength');
   });
 
   it.each([
@@ -216,7 +217,7 @@ describe('API controllers', () => {
 
   it('returns each hint level and then a stable exhaustion error', async () => {
     const { harness, body } = await createViaApi();
-    for (let level = 1; level <= 3; level += 1) {
+    for (let level = 1; level <= 2; level += 1) {
       const response = await requestHintController(
         authorized(`http://localhost/api/games/${body.game.gameId}/hints`, body.resumeToken, { method: 'POST' }),
         harness.service,
@@ -226,13 +227,13 @@ describe('API controllers', () => {
       expect(game.revealedHints).toHaveLength(level);
       expect(game.revealedHints.at(-1)?.level).toBe(level);
     }
-    const fourth = await requestHintController(
+    const third = await requestHintController(
       authorized(`http://localhost/api/games/${body.game.gameId}/hints`, body.resumeToken, { method: 'POST' }),
       harness.service,
       body.game.gameId,
     );
-    expect(fourth.status).toBe(409);
-    expect(((await fourth.json()) as ApiErrorBody).error.code).toBe('HINTS_EXHAUSTED');
+    expect(third.status).toBe(409);
+    expect(((await third.json()) as ApiErrorBody).error.code).toBe('HINTS_EXHAUSTED');
   });
 
   it('reveals the answer only after abandon and blocks subsequent guessing', async () => {

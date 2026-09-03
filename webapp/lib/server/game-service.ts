@@ -1,3 +1,4 @@
+import { MAX_HINT_COUNT } from '../contracts';
 import type {
   ApiErrorCode,
   CreateGameResponse,
@@ -205,7 +206,7 @@ export class GameService {
     await this.authenticate(gameId, resumeToken);
     const mutation = await this.options.store.useHint(gameId);
     if (mutation === 'exhausted') {
-      throw new GameError('HINTS_EXHAUSTED', '本局的三条提示已经全部使用。', 409);
+      throw new GameError('HINTS_EXHAUSTED', '本局的两条提示已经全部使用。', 409);
     }
     if (mutation === 'finished') {
       throw new GameError('GAME_FINISHED', '这局已经结束，不能再获取提示。', 409);
@@ -263,7 +264,8 @@ export class GameService {
         (a, b) =>
           b.scoreMilliPercent - a.scoreMilliPercent || a.sequence - b.sequence,
       )[0];
-    const revealedHints = buildHints(question).slice(0, game.hintCount);
+    const publicHintCount = Math.min(game.hintCount, MAX_HINT_COUNT);
+    const revealedHints = buildHints(question).slice(0, publicHintCount);
     const endedAt = game.endedAt ?? undefined;
     return {
       gameId: game.id,
@@ -272,7 +274,6 @@ export class GameService {
       mode: game.mode ?? 'random',
       ...(game.dailyDate ? { dailyDate: game.dailyDate } : {}),
       category: question.category,
-      answerLength: question.length,
       startedAt: new Date(game.startedAt).toISOString(),
       ...(endedAt === undefined
         ? {}
@@ -282,7 +283,7 @@ export class GameService {
             answer: question.answer,
           }),
       guessCount: publicGuesses.length,
-      hintCount: game.hintCount,
+      hintCount: publicHintCount,
       revealedHints,
       guesses: publicGuesses,
       bestGuess: bestGuess ? toPublicGuess(bestGuess) : null,
@@ -324,10 +325,73 @@ function normalizeSemanticScore(value: number | SemanticScore): SemanticScore {
 
 function buildHints(question: Question): PublicHint[] {
   return [
-    { level: 1, label: '更具体的范围', value: question.subcategory },
-    { level: 2, label: '高关联参考词', value: question.hotHint },
-    { level: 3, label: '开头字', value: Array.from(question.answer)[0] },
+    { level: 1, label: '思考方向', value: broadHintForCategory(question.category) },
+    { level: 2, label: '缩小范围', value: fineHintForQuestion(question) },
   ];
+}
+
+function broadHintForCategory(category: Question['category']): string {
+  return {
+    '动物': '先从生活环境、活动方式和外形特征考虑',
+    '食物': '先从食用场景、口感和制作方式考虑',
+    '职业': '先从工作场景、服务对象和常用工具考虑',
+    '自然现象': '先从出现环境、形成条件和视觉表现考虑',
+    '抽象概念': '先从人的感受、选择和行为状态考虑',
+    '日常物品': '先从使用场景、核心功能和操作方式考虑',
+    '历史人物': '先从所处时代、人物身份和活动领域考虑',
+    '体育圈': '先从运动项目、赛场角色和代表经历考虑',
+  }[category];
+}
+
+function fineHintForQuestion(question: Question): string {
+  const detail = question.subcategory;
+  switch (question.category) {
+    case '动物':
+      if (/寒冷|北极|南极|冰/.test(detail)) return '再从寒冷环境的适应方式和活动区域缩小';
+      if (/海洋|水中|水生|河/.test(detail)) return '再从水域环境和行动方式缩小';
+      if (/夜间|夜行|发光/.test(detail)) return '再从活动时段和感知方式缩小';
+      if (/草原|沙漠|干旱|高原|澳洲|南美/.test(detail)) return '再从地理环境和移动方式缩小';
+      return '再从所属动物大类、食性和身体结构缩小';
+    case '食物':
+      if (/饮品|冲泡|发酵|奶|水/.test(detail)) return '再从饮用温度、原料和口味缩小';
+      if (/甜|零食|糕点|烘焙|庆祝/.test(detail)) return '再从甜咸口味和常见食用场合缩小';
+      if (/主食|稻米|面食|谷物/.test(detail)) return '再从主要原料和饮食中的位置缩小';
+      if (/传统|端午|中秋|年夜/.test(detail)) return '再从节日场景和制作形式缩小';
+      return '再从原料来源、烹饪方式和食用时机缩小';
+    case '职业':
+      if (/医疗|疾病|护理|口腔|诊断/.test(detail)) return '再从健康服务的对象和工作地点缩小';
+      if (/法律|法庭|案件|公共秩序/.test(detail)) return '再从规则执行方式和服务对象缩小';
+      if (/学校|知识|研究|自然规律/.test(detail)) return '再从知识生产或传递的场景缩小';
+      if (/艺术|绘画|影像|新闻|报道/.test(detail)) return '再从内容创作方式和成果形态缩小';
+      return '再从主要工作地点和每日任务缩小';
+    case '自然现象':
+      if (/天体|夜空|高纬|太阳|月球|天文|光/.test(detail)) return '再从天空中的出现条件和光影变化缩小';
+      if (/风|云|雨|对流|气/.test(detail)) return '再从大气条件、强度和持续时间缩小';
+      if (/雪|冰|低温|凝华/.test(detail)) return '再从温度条件和物质形态变化缩小';
+      if (/海|河|水/.test(detail)) return '再从水体运动方式和规模缩小';
+      return '再从地表或地下的形成过程和速度缩小';
+    case '抽象概念':
+      if (/情感|感受|期待|惋惜|满足|陪伴/.test(detail)) return '再从情绪的触发原因和持续方式缩小';
+      if (/品质|态度|价值|公正|诚恳|职责/.test(detail)) return '再从个人品质与对他人的影响缩小';
+      if (/理解|思路|想法|未知|能力/.test(detail)) return '再从思考过程和它带来的行动缩小';
+      return '再从它对人的行为和选择产生的影响缩小';
+    case '日常物品':
+      if (/电器|设备|计算机|电源|电量|照明/.test(detail)) return '再从供能方式、操作位置和输出效果缩小';
+      if (/厨房|食物|饮用|餐具|容器/.test(detail)) return '再从家庭使用区域和接触的物品缩小';
+      if (/个人|牙齿|头发|耳朵|佩戴|睡眠/.test(detail)) return '再从与身体的互动方式和使用时段缩小';
+      if (/旅行|携带|背负|装载|学生/.test(detail)) return '再从携带方式、收纳对象和出现场景缩小';
+      return '再从它处理的对象、手部动作和使用结果缩小';
+    case '历史人物':
+      if (/思想|教育|儒家|心学/.test(detail)) return '再从思想传播、教育影响和学派缩小';
+      if (/文学|诗人|书画|作家|史学/.test(detail)) return '再从文化成就、作品类型和时代缩小';
+      if (/皇帝|政治|军事|名将|建立者|帝国/.test(detail)) return '再从政权、军事或国家治理方面缩小';
+      return '再从主要成就的领域和历史影响缩小';
+    case '体育圈':
+      if (/球|篮球|足球|羽毛球|乒乓/.test(detail)) return '再从球类项目的器械、场地和赛场角色缩小';
+      if (/游泳|跳水|水上/.test(detail)) return '再从水上项目的动作特点和比赛方式缩小';
+      if (/跑|跨栏|田径|马拉松/.test(detail)) return '再从速度、耐力和赛道特点缩小';
+      return '再从力量、技巧或身体协调方式缩小';
+  }
 }
 
 function randomToken(): string {

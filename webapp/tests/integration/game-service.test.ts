@@ -100,17 +100,22 @@ describe('game service integration', () => {
     expect(updated.guesses[0]).toMatchObject({ guess: '海豹', score: 73.527 });
   });
 
-  it('reveals three hints in order and rejects a fourth', async () => {
+  it('reveals two progressively narrower hints and rejects a third', async () => {
     const { service } = createTestHarness();
     const created = await service.createGame('动物');
     const first = await service.useHint(created.game.gameId, created.resumeToken);
-    expect(first.revealedHints).toEqual([{ level: 1, label: '更具体的范围', value: '生活在寒冷地区的鸟类' }]);
+    expect(first.revealedHints).toEqual([{
+      level: 1,
+      label: '思考方向',
+      value: '先从生活环境、活动方式和外形特征考虑',
+    }]);
     const second = await service.useHint(created.game.gameId, created.resumeToken);
     expect(second.revealedHints).toHaveLength(2);
-    expect(second.revealedHints[1]).toMatchObject({ level: 2 });
-    const third = await service.useHint(created.game.gameId, created.resumeToken);
-    expect(second.revealedHints[1]).toEqual({ level: 2, label: '高关联参考词', value: '南极' });
-    expect(third.revealedHints[2]).toEqual({ level: 3, label: '开头字', value: '企' });
+    expect(second.revealedHints[1]).toEqual({
+      level: 2,
+      label: '缩小范围',
+      value: '再从寒冷环境的适应方式和活动区域缩小',
+    });
     await expect(service.useHint(created.game.gameId, created.resumeToken)).rejects.toMatchObject({
       code: 'HINTS_EXHAUSTED',
     });

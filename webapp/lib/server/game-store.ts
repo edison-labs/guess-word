@@ -451,7 +451,7 @@ export class D1GameStore implements GameStore {
       .prepare(`
         UPDATE games
         SET hint_count = hint_count + 1
-        WHERE id = ? AND status = 'active' AND hint_count < 3
+        WHERE id = ? AND status = 'active' AND hint_count < 2
         RETURNING hint_count
       `)
       .bind(gameId)
@@ -601,7 +601,7 @@ export class MemoryGameStore implements GameStore {
     const game = this.games.get(gameId);
     if (!game) return 'missing';
     if (game.status !== 'active') return 'finished';
-    if (game.hintCount >= 3) return 'exhausted';
+    if (game.hintCount >= 2) return 'exhausted';
     game.hintCount += 1;
     return game.hintCount;
   }

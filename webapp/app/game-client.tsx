@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   GAME_CATEGORIES,
+  MAX_HINT_COUNT,
   type GameCategory,
   ApiErrorBody,
   CreateGameResponse,
@@ -315,7 +316,7 @@ export default function GameClient() {
   }
 
   async function requestHint() {
-    if (!session || !game || game.status !== 'active' || game.hintCount >= 3 || busy) return;
+    if (!session || !game || game.status !== 'active' || game.hintCount >= MAX_HINT_COUNT || busy) return;
     setBusy('hint');
     setMessage('');
     try {
@@ -410,7 +411,7 @@ export default function GameClient() {
     const bars = game.guesses.slice(-8).map((item) => scoreBlock(item.score)).join('');
     const text = [
       `GuessWord ${game.mode === 'daily' ? `每日挑战 ${game.dailyDate}` : game.category}`,
-      `${game.status === 'won' ? `第 ${game.guessCount} 次猜中` : `挑战结束 · ${game.guessCount} 次猜测`} · 提示 ${game.hintCount}/3`,
+      `${game.status === 'won' ? `第 ${game.guessCount} 次猜中` : `挑战结束 · ${game.guessCount} 次猜测`} · 提示 ${game.hintCount}/${MAX_HINT_COUNT}`,
       bars || '还没有猜测',
       `来试试 AI 联想猜词：${location.href}`,
     ].join('\n');
@@ -456,7 +457,7 @@ export default function GameClient() {
                     ? '输入 1～10 个汉字。AI 会综合词义、用途、场景、相似点和差异给出关系分；精确猜中为 100%。'
                     : '输入 1～10 个汉字，根据页面返回的测试关系分逐步尝试；精确猜中为 100%。'}
                 </p>
-                <p>答案字数会直接显示；每局还可依次使用范围、参考词和开头字三条提示。</p>
+                <p>答案字数保密；每局可依次获取两条由宽到窄的方向提示，不会提供首字或直接特征。</p>
               </div>
             </details>
           </div>
@@ -497,7 +498,7 @@ export default function GameClient() {
                   <dl className="daily-result-stats">
                     <div><dt>猜测</dt><dd>{todayDailyResult.guessCount} 次</dd></div>
                     <div><dt>用时</dt><dd>{formatDuration(todayDailyResult.durationSeconds ?? 0)}</dd></div>
-                    <div><dt>提示</dt><dd>{todayDailyResult.hintCount}/3</dd></div>
+                    <div><dt>提示</dt><dd>{todayDailyResult.hintCount}/{MAX_HINT_COUNT}</dd></div>
                   </dl>
                   {currentTodayDaily && (
                     <button className="daily-result-link" type="button" onClick={() => setShowHome(false)}>
@@ -549,7 +550,6 @@ export default function GameClient() {
                 <>
                   <div className="game-title-row">
                     <h1 id="game-title">{game.category} · 猜隐藏词</h1>
-                    <span className="answer-length">目标 {game.answerLength} 个字</span>
                   </div>
                   <p className="intro">从词义、用途、场景和相似点逐步接近答案。</p>
                 </>
@@ -644,11 +644,11 @@ export default function GameClient() {
                     <button
                       className="hint-action"
                       type="button"
-                      disabled={Boolean(busy) || game.hintCount >= 3}
+                      disabled={Boolean(busy) || game.hintCount >= MAX_HINT_COUNT}
                       onClick={() => void requestHint()}
                     >
                       <span aria-hidden="true">💡</span>
-                      {game.hintCount >= 3 ? '提示已用完' : busy === 'hint' ? '正在揭示…' : `获取提示 ${game.hintCount + 1}/3`}
+                      {game.hintCount >= MAX_HINT_COUNT ? '提示已用完' : busy === 'hint' ? '正在揭示…' : `获取提示 ${game.hintCount + 1}/${MAX_HINT_COUNT}`}
                     </button>
                     <button ref={abandonButtonRef} className="reveal" type="button" disabled={Boolean(busy)} onClick={() => setConfirmAbandon(true)}>
                       查看答案
