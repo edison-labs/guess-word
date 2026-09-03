@@ -28,6 +28,19 @@ describe('game service integration', () => {
     expect(created.game).toMatchObject({ mode: 'daily', dailyDate: '2026-08-30', status: 'active' });
   });
 
+  it('keeps answer length private until six unsuccessful guesses', async () => {
+    const { service } = createTestHarness();
+    const created = await service.createGame('动物');
+    expect(created.game).not.toHaveProperty('answerLength');
+
+    const guesses = ['银行', '汽车', '鸟类', '海豹', '南极', '寒冷'];
+    for (const [index, guess] of guesses.entries()) {
+      const game = await service.submitGuess(created.game.gameId, created.resumeToken, guess);
+      if (index < guesses.length - 1) expect(game).not.toHaveProperty('answerLength');
+      else expect(game.answerLength).toBe(2);
+    }
+  });
+
   it('reuses a persistent semantic score across games and records feedback', async () => {
     const scorer: SemanticScorer = {
       cacheNamespace: 'test:model:v1',

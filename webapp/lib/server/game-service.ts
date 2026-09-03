@@ -1,4 +1,4 @@
-import { MAX_HINT_COUNT } from '../contracts';
+import { ANSWER_LENGTH_UNLOCK_GUESSES, MAX_HINT_COUNT } from '../contracts';
 import type {
   ApiErrorCode,
   CreateGameResponse,
@@ -274,6 +274,9 @@ export class GameService {
       mode: game.mode ?? 'random',
       ...(game.dailyDate ? { dailyDate: game.dailyDate } : {}),
       category: question.category,
+      ...(game.status === 'active' && publicGuesses.length >= ANSWER_LENGTH_UNLOCK_GUESSES
+        ? { answerLength: question.length }
+        : {}),
       startedAt: new Date(game.startedAt).toISOString(),
       ...(endedAt === undefined
         ? {}

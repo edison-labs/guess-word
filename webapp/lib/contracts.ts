@@ -2,6 +2,7 @@ export type GameStatus = 'active' | 'won' | 'abandoned';
 export type ScoringMode = 'test' | 'semantic';
 export type GameMode = 'random' | 'daily';
 export const MAX_HINT_COUNT = 2;
+export const ANSWER_LENGTH_UNLOCK_GUESSES = 6;
 
 export const GAME_CATEGORIES = [
   '动物',
@@ -51,6 +52,7 @@ export type PublicGame = {
   mode?: GameMode;
   dailyDate?: string;
   category: GameCategory;
+  answerLength?: number;
   startedAt: string;
   endedAt?: string;
   durationSeconds?: number;

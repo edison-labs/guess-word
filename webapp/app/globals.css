@@ -100,6 +100,7 @@ button, summary { cursor: pointer; }
 
 .game-title-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: .55rem; margin-top: .35rem; }
 .game-title-row h1 { margin: 0; }
+.rescue-length { flex: none; padding: .25rem .5rem; border: 1px dashed #d99657; border-radius: 999px; background: #fff7e9; color: #8f451b; font-size: .66rem; font-weight: 800; }
 h1 { margin: .65rem 0 .25rem; font-size: clamp(1.55rem, 5vw, 2rem); line-height: 1.08; letter-spacing: -.045em; }
 .intro { margin: .22rem 0 .65rem; color: var(--muted); font-size: .8rem; line-height: 1.45; }
 

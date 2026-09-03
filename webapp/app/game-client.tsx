@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ANSWER_LENGTH_UNLOCK_GUESSES,
   GAME_CATEGORIES,
   MAX_HINT_COUNT,
   type GameCategory,
@@ -457,7 +458,8 @@ export default function GameClient() {
                     ? '输入 1～10 个汉字。AI 会综合词义、用途、场景、相似点和差异给出关系分；精确猜中为 100%。'
                     : '输入 1～10 个汉字，根据页面返回的测试关系分逐步尝试；精确猜中为 100%。'}
                 </p>
-                <p>答案字数保密；每局可依次获取两条由宽到窄的方向提示，不会提供首字或直接特征。</p>
+                <p>答案字数开局时保密；每局可依次获取两条由宽到窄的方向提示，不会提供首字或直接特征。</p>
+                <p>连续猜错 {ANSWER_LENGTH_UNLOCK_GUESSES} 次后会自动解锁准确字数，且不消耗提示次数。</p>
               </div>
             </details>
           </div>
@@ -550,6 +552,9 @@ export default function GameClient() {
                 <>
                   <div className="game-title-row">
                     <h1 id="game-title">{game.category} · 猜隐藏词</h1>
+                    {game.answerLength !== undefined && (
+                      <span className="rescue-length">救援线索 · {game.answerLength} 个字</span>
+                    )}
                   </div>
                   <p className="intro">从词义、用途、场景和相似点逐步接近答案。</p>
                 </>
