@@ -98,7 +98,7 @@ button, summary { cursor: pointer; }
 .scoring-notice span { color: #735746; }
 .scoring-notice.test { border-left-color: #bd8a20; background: #fff9e7; color: #72520f; }
 
-.game-title-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .35rem; }
+.game-title-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: .55rem; margin-top: .35rem; }
 .game-title-row h1 { margin: 0; }
 .answer-length { flex: none; padding: .32rem .58rem; border: 1px solid #e4c4aa; border-radius: 999px; background: #fff7ef; color: var(--accent-dark); font-size: .72rem; font-weight: 850; }
 h1 { margin: .65rem 0 .25rem; font-size: clamp(1.55rem, 5vw, 2rem); line-height: 1.08; letter-spacing: -.045em; }
