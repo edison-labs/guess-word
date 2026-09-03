@@ -300,7 +300,7 @@ export default function GameClient() {
       setInput('');
       setMessage(
         newest
-          ? `${newest.guess}：${formatScore(newest.score)}%，${newest.temperature}`
+          ? `${newest.guess}：${formatScore(newest.score)}%，${newest.relationHint}`
           : '关系分已更新。',
       );
       requestAnimationFrame(() => inputRef.current?.focus());
@@ -725,7 +725,7 @@ function GuessRow({ guess, isLatest, feedbackSent, onFeedback }: { guess: Public
         <div className="guess-copy">
           <span className="guess-sequence">#{guess.sequence}</span>
           <strong>{guess.guess}</strong>
-          <span className="guess-temperature">{guess.temperature}</span>
+          <span className="guess-relation" title={`${guess.temperature}：${guess.relationHint}`}>{guess.relationHint}</span>
           {isLatest && <span className="latest-label">新</span>}
         </div>
         <div

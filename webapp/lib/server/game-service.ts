@@ -15,7 +15,12 @@ import {
 } from '../game-rules';
 import type { GameRecord, GameStore, GuessRecord } from './game-store';
 import { getQuestionById, selectDailyQuestion, selectRandomQuestion, type Question } from './questions';
-import { SemanticScorerError, type SemanticScorer } from './scoring';
+import {
+  fallbackRelationHint,
+  SemanticScorerError,
+  type SemanticScore,
+  type SemanticScorer,
+} from './scoring';
 
 export class GameError extends Error {
   constructor(
@@ -125,6 +130,7 @@ export class GameService {
     try {
       const exact = validated.value === question.answer.normalize('NFKC').trim();
       let scoreMilliPercent = 100_000;
+      let relationHint = '和目标词完全一致';
       if (!exact) {
         try {
           const namespace = this.options.scorer.cacheNamespace;
@@ -132,14 +138,17 @@ export class GameService {
             ? await this.options.store.getSemanticScore(namespace, question.id, validated.value)
             : null;
           if (cached === null) {
-            scoreMilliPercent = capNonExactScore(
+            const scored = normalizeSemanticScore(
               await this.options.scorer.scoreNonExact(validated.value, question),
             );
+            scoreMilliPercent = scored.scoreMilliPercent;
+            relationHint = scored.relationHint;
             if (namespace) {
-              await this.options.store.putSemanticScore(namespace, question.id, validated.value, scoreMilliPercent, this.now());
+              await this.options.store.putSemanticScore(namespace, question.id, validated.value, scored, this.now());
             }
           } else {
-            scoreMilliPercent = cached;
+            scoreMilliPercent = cached.scoreMilliPercent;
+            relationHint = cached.relationHint || fallbackRelationHint(scoreMilliPercent);
           }
         } catch (error) {
           const isConfigurationError =
@@ -166,6 +175,7 @@ export class GameService {
           displayGuess: validated.value,
           scoreMilliPercent,
           temperature: scoreToTemperature(scoreMilliPercent),
+          relationHint,
           createdAt: this.now(),
         },
         exact,
@@ -292,7 +302,23 @@ function toPublicGuess(record: GuessRecord): PublicGuess {
     // Derive the public label from the score so restored games immediately
     // receive the latest, clearer wording even if an older label was stored.
     temperature: scoreToTemperature(record.scoreMilliPercent),
+    relationHint: record.relationHint || fallbackRelationHint(record.scoreMilliPercent),
     submittedAt: new Date(record.createdAt).toISOString(),
+  };
+}
+
+function normalizeSemanticScore(value: number | SemanticScore): SemanticScore {
+  if (typeof value === 'number') {
+    const scoreMilliPercent = capNonExactScore(value);
+    return {
+      scoreMilliPercent,
+      relationHint: fallbackRelationHint(scoreMilliPercent),
+    };
+  }
+  const scoreMilliPercent = capNonExactScore(value.scoreMilliPercent);
+  return {
+    scoreMilliPercent,
+    relationHint: value.relationHint.trim() || fallbackRelationHint(scoreMilliPercent),
   };
 }
 

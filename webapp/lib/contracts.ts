@@ -20,11 +20,11 @@ export function isGameCategory(value: unknown): value is GameCategory {
 }
 
 export type Temperature =
-  | '几乎无关'
-  | '关联较弱'
-  | '有些关联'
-  | '关联较强'
-  | '高度相关'
+  | '关系较远'
+  | '同类线索'
+  | '方向接近'
+  | '明显相关'
+  | '强关系'
   | '非常接近'
   | '猜中';
 
@@ -39,6 +39,7 @@ export type PublicGuess = {
   guess: string;
   score: number;
   temperature: Temperature;
+  relationHint: string;
   submittedAt: string;
 };
 

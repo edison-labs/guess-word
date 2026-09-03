@@ -151,17 +151,17 @@ h2 { margin: 0; font-size: 1.08rem; letter-spacing: -.03em; }
 
 .guess-list { display: grid; gap: .34rem; margin: .5rem 0 0; padding: 0; list-style: none; }
 .guess-item { --temp: #587184; display: grid; grid-template-columns: minmax(0, 1fr) 6rem; gap: .36rem; align-items: stretch; }
-.guess-item[data-temperature="关联较弱"] { --temp: #426f9c; }
-.guess-item[data-temperature="有些关联"] { --temp: #805e10; }
-.guess-item[data-temperature="关联较强"] { --temp: #a54e1b; }
-.guess-item[data-temperature="高度相关"] { --temp: #bd3f34; }
+.guess-item[data-temperature="同类线索"] { --temp: #426f9c; }
+.guess-item[data-temperature="方向接近"] { --temp: #805e10; }
+.guess-item[data-temperature="明显相关"] { --temp: #a54e1b; }
+.guess-item[data-temperature="强关系"] { --temp: #bd3f34; }
 .guess-item[data-temperature="非常接近"], .guess-item[data-temperature="猜中"] { --temp: #9f2734; }
 .guess-word-cell, .guess-score { border: 1px solid #eee4d9; border-radius: .78rem; background: #faf6f0; box-shadow: 0 2px 8px rgb(76 50 29 / 4%); }
 .guess-word-cell { min-width: 0; padding: .48rem .65rem .42rem; }
 .guess-copy { display: flex; min-width: 0; align-items: center; gap: .55rem; }
 .guess-copy strong { overflow: hidden; font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
 .guess-sequence { flex: none; color: var(--muted); font-size: .68rem; font-variant-numeric: tabular-nums; }
-.guess-temperature { margin-left: auto; color: var(--temp); font-size: .7rem; font-weight: 750; }
+.guess-relation { display: -webkit-box; min-width: 0; max-width: 62%; margin-left: auto; overflow: hidden; color: var(--temp); font-size: .68rem; font-weight: 700; line-height: 1.3; text-align: right; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .latest-label { flex: none; padding: .12rem .34rem; border-radius: .3rem; background: var(--accent); color: white; font-size: .58rem; font-weight: 850; }
 .score-progress { overflow: hidden; height: .2rem; margin-top: .35rem; border-radius: 999px; background: #e7ddd3; }
 .score-progress span { display: block; height: 100%; border-radius: inherit; background: var(--temp); }
@@ -221,7 +221,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   .sort-tabs button { padding: 0 .55rem; }
   .guess-item { grid-template-columns: minmax(0, 1fr) 5.9rem; }
   .guess-word-cell { padding-inline: .65rem; }
-  .guess-temperature { font-size: .64rem; }
+  .guess-relation { max-width: 58%; font-size: .62rem; }
   .guess-score { font-size: .92rem; }
   .hint-list li { grid-template-columns: 1fr; gap: .2rem; }
   .result-stats { grid-template-columns: 1fr 1fr; }

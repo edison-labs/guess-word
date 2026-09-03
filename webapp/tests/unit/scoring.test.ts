@@ -181,6 +181,7 @@ describe('deterministic scoring adapter', () => {
                 relationship: 75.123,
                 similarity: 80.456,
                 direction: 65.789,
+                hint: '同为寒冷地区动物，但生物类别不同',
               }),
             },
           }],
@@ -192,11 +193,17 @@ describe('deterministic scoring adapter', () => {
       apiKey: 'deepseek-server-secret',
       model: 'deepseek-v4-flash',
     });
-    expect(scorer.cacheNamespace).toBe('deepseek:deepseek-v4-flash:v5');
+    expect(scorer.cacheNamespace).toBe('deepseek:deepseek-v4-flash:v6');
     const question = getQuestionById('animal_penguin')!;
 
-    expect(await scorer.scoreNonExact('海豹', question)).toBe(75_123);
-    expect(await scorer.scoreNonExact('海豹', question)).toBe(75_123);
+    expect(await scorer.scoreNonExact('海豹', question)).toEqual({
+      scoreMilliPercent: 75_123,
+      relationHint: '同为寒冷地区动物，但生物类别不同',
+    });
+    expect(await scorer.scoreNonExact('海豹', question)).toEqual({
+      scoreMilliPercent: 75_123,
+      relationHint: '同为寒冷地区动物，但生物类别不同',
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('https://api.deepseek.com/chat/completions');
     expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
@@ -216,7 +223,8 @@ describe('deterministic scoring adapter', () => {
       thinking: { type: 'disabled' },
       temperature: 0,
     });
-    expect(request.messages[0].content).toContain('同属一个宽泛类别但用途不同为 10～30');
+    expect(request.messages[0].content).toContain('同一具体身份或子类 35～60');
+    expect(request.messages[0].content).toContain('同为中国古代皇帝');
     expect(JSON.parse(request.messages[1].content)).toEqual({
       target: '企鹅',
       targetCategory: '动物',
@@ -246,6 +254,33 @@ describe('deterministic scoring adapter', () => {
       kind: 'unavailable',
       retryable: true,
     });
+  });
+
+  it('replaces a relation hint that leaks the target word', async () => {
+    const question = getQuestionById('animal_penguin')!;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              relationship: 35.127,
+              similarity: 42.318,
+              direction: 38.941,
+              hint: '目标是企鹅，与海豹都生活在寒冷地区',
+            }),
+          },
+        }],
+      })),
+    );
+    const scorer = new DeepSeekJudgeSemanticScorer({
+      apiKey: 'secret',
+      model: 'deepseek-v4-flash',
+    });
+
+    const result = await scorer.scoreNonExact('海豹', question);
+    expect(result.relationHint).not.toContain('企鹅');
+    expect(result.relationHint.length).toBeGreaterThan(0);
   });
 
   it('rejects invalid DeepSeek scores', async () => {

@@ -19,8 +19,14 @@ export type GuessRecord = {
   displayGuess: string;
   scoreMilliPercent: number;
   temperature: Temperature;
+  relationHint: string;
   sequence: number;
   createdAt: number;
+};
+
+export type SemanticScoreRecord = {
+  scoreMilliPercent: number;
+  relationHint: string;
 };
 
 export type CommitGuessResult = 'created' | 'duplicate' | 'finished' | 'missing';
@@ -81,8 +87,8 @@ export interface GameStore {
   ): Promise<CommitGuessResult | 'claim-lost'>;
   useHint(gameId: string): Promise<HintMutationResult>;
   abandon(gameId: string, endedAt: number): Promise<FinishMutationResult>;
-  getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<number | null>;
-  putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, scoreMilliPercent: number, createdAt: number): Promise<void>;
+  getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<SemanticScoreRecord | null>;
+  putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, score: SemanticScoreRecord, createdAt: number): Promise<void>;
   recordAiUsage(record: AiUsageRecord): Promise<void>;
   recordScoreFeedback(gameId: string, normalizedGuess: string, direction: 'too_high' | 'too_low', createdAt: number): Promise<void>;
   getAiStats(): Promise<AiStats>;
@@ -108,6 +114,7 @@ type GuessRow = {
   score_tenths: number;
   score_milli_percent: number;
   temperature: Temperature;
+  relation_hint: string;
   sequence: number;
   created_at: number;
 };
@@ -134,6 +141,7 @@ function mapGuess(row: GuessRow): GuessRecord {
     displayGuess: row.display_guess,
     scoreMilliPercent: row.score_milli_percent,
     temperature: row.temperature,
+    relationHint: row.relation_hint || '',
     sequence: row.sequence,
     createdAt: row.created_at,
   };
@@ -175,6 +183,7 @@ export class D1GameStore implements GameStore {
           score_tenths INTEGER NOT NULL CHECK (score_tenths BETWEEN 0 AND 1000),
           score_milli_percent INTEGER NOT NULL DEFAULT 0 CHECK (score_milli_percent BETWEEN 0 AND 100000),
           temperature TEXT NOT NULL,
+          relation_hint TEXT NOT NULL DEFAULT '',
           sequence INTEGER NOT NULL,
           created_at INTEGER NOT NULL,
           PRIMARY KEY (game_id, normalized_guess),
@@ -196,7 +205,7 @@ export class D1GameStore implements GameStore {
       this.db.prepare('CREATE INDEX IF NOT EXISTS idx_guesses_game_score ON guesses(game_id, score_tenths DESC, sequence)'),
       this.db.prepare(`CREATE TABLE IF NOT EXISTS semantic_scores (
         provider_key TEXT NOT NULL, question_id TEXT NOT NULL, normalized_guess TEXT NOT NULL,
-        score_milli_percent INTEGER NOT NULL, created_at INTEGER NOT NULL,
+        score_milli_percent INTEGER NOT NULL, relation_hint TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL,
         PRIMARY KEY (provider_key, question_id, normalized_guess)
       )`),
       this.db.prepare(`CREATE TABLE IF NOT EXISTS ai_usage (
@@ -225,6 +234,19 @@ export class D1GameStore implements GameStore {
     if (!columns.results.some((column) => column.name === 'score_milli_percent')) {
       await this.db
         .prepare('ALTER TABLE guesses ADD COLUMN score_milli_percent INTEGER NOT NULL DEFAULT 0')
+        .run();
+    }
+    if (!columns.results.some((column) => column.name === 'relation_hint')) {
+      await this.db
+        .prepare("ALTER TABLE guesses ADD COLUMN relation_hint TEXT NOT NULL DEFAULT ''")
+        .run();
+    }
+    const semanticColumns = await this.db
+      .prepare('PRAGMA table_info(semantic_scores)')
+      .all<{ name: string }>();
+    if (!semanticColumns.results.some((column) => column.name === 'relation_hint')) {
+      await this.db
+        .prepare("ALTER TABLE semantic_scores ADD COLUMN relation_hint TEXT NOT NULL DEFAULT ''")
         .run();
     }
     await this.db
@@ -360,9 +382,9 @@ export class D1GameStore implements GameStore {
       .prepare(`
         INSERT INTO guesses (
           game_id, normalized_guess, display_guess, score_tenths,
-          score_milli_percent, temperature, sequence, created_at
+          score_milli_percent, temperature, relation_hint, sequence, created_at
         )
-        SELECT ?, ?, ?, ?, ?, ?,
+        SELECT ?, ?, ?, ?, ?, ?, ?,
           COALESCE((SELECT MAX(sequence) FROM guesses WHERE game_id = ?), 0) + 1,
           ?
         WHERE EXISTS (SELECT 1 FROM games WHERE id = ? AND status = 'active')
@@ -380,6 +402,7 @@ export class D1GameStore implements GameStore {
         Math.round(guess.scoreMilliPercent / 100),
         guess.scoreMilliPercent,
         guess.temperature,
+        guess.relationHint,
         gameId,
         guess.createdAt,
         gameId,
@@ -456,15 +479,15 @@ export class D1GameStore implements GameStore {
     return game ? 'already-finished' : 'missing';
   }
 
-  async getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<number | null> {
+  async getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<SemanticScoreRecord | null> {
     await this.init();
-    const row = await this.db.prepare('SELECT score_milli_percent FROM semantic_scores WHERE provider_key = ? AND question_id = ? AND normalized_guess = ?').bind(providerKey, questionId, normalizedGuess).first<{ score_milli_percent: number }>();
-    return row?.score_milli_percent ?? null;
+    const row = await this.db.prepare('SELECT score_milli_percent, relation_hint FROM semantic_scores WHERE provider_key = ? AND question_id = ? AND normalized_guess = ?').bind(providerKey, questionId, normalizedGuess).first<{ score_milli_percent: number; relation_hint: string }>();
+    return row ? { scoreMilliPercent: row.score_milli_percent, relationHint: row.relation_hint || '' } : null;
   }
 
-  async putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, scoreMilliPercent: number, createdAt: number): Promise<void> {
+  async putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, score: SemanticScoreRecord, createdAt: number): Promise<void> {
     await this.init();
-    await this.db.prepare(`INSERT INTO semantic_scores VALUES (?, ?, ?, ?, ?) ON CONFLICT(provider_key, question_id, normalized_guess) DO UPDATE SET score_milli_percent = excluded.score_milli_percent, created_at = excluded.created_at`).bind(providerKey, questionId, normalizedGuess, scoreMilliPercent, createdAt).run();
+    await this.db.prepare(`INSERT INTO semantic_scores (provider_key, question_id, normalized_guess, score_milli_percent, relation_hint, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(provider_key, question_id, normalized_guess) DO UPDATE SET score_milli_percent = excluded.score_milli_percent, relation_hint = excluded.relation_hint, created_at = excluded.created_at`).bind(providerKey, questionId, normalizedGuess, score.scoreMilliPercent, score.relationHint, createdAt).run();
   }
 
   async recordAiUsage(record: AiUsageRecord): Promise<void> {
@@ -490,7 +513,7 @@ export class MemoryGameStore implements GameStore {
   private readonly games = new Map<string, GameRecord>();
   private readonly guesses = new Map<string, GuessRecord[]>();
   private readonly guessClaims = new Map<string, { token: string; claimedAt: number }>();
-  private readonly semanticScores = new Map<string, number>();
+  private readonly semanticScores = new Map<string, SemanticScoreRecord>();
   private readonly aiUsage: AiUsageRecord[] = [];
   private readonly feedback = new Map<string, 'too_high' | 'too_low'>();
 
@@ -592,11 +615,12 @@ export class MemoryGameStore implements GameStore {
     return 'finished';
   }
 
-  async getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<number | null> {
-    return this.semanticScores.get(`${providerKey}\u0000${questionId}\u0000${normalizedGuess}`) ?? null;
+  async getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<SemanticScoreRecord | null> {
+    const score = this.semanticScores.get(`${providerKey}\u0000${questionId}\u0000${normalizedGuess}`);
+    return score ? { ...score } : null;
   }
-  async putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, scoreMilliPercent: number): Promise<void> {
-    this.semanticScores.set(`${providerKey}\u0000${questionId}\u0000${normalizedGuess}`, scoreMilliPercent);
+  async putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, score: SemanticScoreRecord): Promise<void> {
+    this.semanticScores.set(`${providerKey}\u0000${questionId}\u0000${normalizedGuess}`, { ...score });
   }
   async recordAiUsage(record: AiUsageRecord): Promise<void> { this.aiUsage.push({ ...record }); }
   async recordScoreFeedback(gameId: string, normalizedGuess: string, direction: 'too_high' | 'too_low'): Promise<void> { this.feedback.set(`${gameId}\u0000${normalizedGuess}`, direction); }

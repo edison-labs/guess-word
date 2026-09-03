@@ -12,6 +12,7 @@ import type {
   HintMutationResult,
   AiStats,
   AiUsageRecord,
+  SemanticScoreRecord,
 } from './game-store';
 
 type GameRow = {
@@ -33,6 +34,7 @@ type GuessRow = {
   display_guess: string;
   score_milli_percent: number;
   temperature: Temperature;
+  relation_hint: string;
   sequence: number;
   created_at: number;
 };
@@ -80,6 +82,7 @@ export class NodeSqliteGameStore implements GameStore {
         score_tenths INTEGER NOT NULL CHECK (score_tenths BETWEEN 0 AND 1000),
         score_milli_percent INTEGER NOT NULL DEFAULT 0 CHECK (score_milli_percent BETWEEN 0 AND 100000),
         temperature TEXT NOT NULL,
+        relation_hint TEXT NOT NULL DEFAULT '',
         sequence INTEGER NOT NULL,
         created_at INTEGER NOT NULL,
         PRIMARY KEY (game_id, normalized_guess),
@@ -97,6 +100,7 @@ export class NodeSqliteGameStore implements GameStore {
       CREATE TABLE IF NOT EXISTS semantic_scores (
         provider_key TEXT NOT NULL, question_id TEXT NOT NULL, normalized_guess TEXT NOT NULL,
         score_milli_percent INTEGER NOT NULL CHECK (score_milli_percent BETWEEN 0 AND 100000),
+        relation_hint TEXT NOT NULL DEFAULT '',
         created_at INTEGER NOT NULL, PRIMARY KEY (provider_key, question_id, normalized_guess)
       );
       CREATE TABLE IF NOT EXISTS ai_usage (
@@ -124,6 +128,13 @@ export class NodeSqliteGameStore implements GameStore {
     if (!gameColumns.some((column) => column.name === 'daily_date')) this.db.exec('ALTER TABLE games ADD COLUMN daily_date TEXT');
     if (!columns.some((column) => column.name === 'score_milli_percent')) {
       this.db.exec('ALTER TABLE guesses ADD COLUMN score_milli_percent INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!columns.some((column) => column.name === 'relation_hint')) {
+      this.db.exec("ALTER TABLE guesses ADD COLUMN relation_hint TEXT NOT NULL DEFAULT ''");
+    }
+    const semanticColumns = this.db.prepare('PRAGMA table_info(semantic_scores)').all() as Array<{ name: string }>;
+    if (!semanticColumns.some((column) => column.name === 'relation_hint')) {
+      this.db.exec("ALTER TABLE semantic_scores ADD COLUMN relation_hint TEXT NOT NULL DEFAULT ''");
     }
     this.db.exec(`
       UPDATE guesses
@@ -248,8 +259,8 @@ export class NodeSqliteGameStore implements GameStore {
       this.db.prepare(`
         INSERT INTO guesses (
           game_id, normalized_guess, display_guess, score_tenths,
-          score_milli_percent, temperature, sequence, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          score_milli_percent, temperature, relation_hint, sequence, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         gameId,
         guess.normalizedGuess,
@@ -257,6 +268,7 @@ export class NodeSqliteGameStore implements GameStore {
         Math.round(guess.scoreMilliPercent / 100),
         guess.scoreMilliPercent,
         guess.temperature,
+        guess.relationHint,
         sequenceRow.next_sequence,
         guess.createdAt,
       );
@@ -300,14 +312,14 @@ export class NodeSqliteGameStore implements GameStore {
     });
   }
 
-  async getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<number | null> {
+  async getSemanticScore(providerKey: string, questionId: string, normalizedGuess: string): Promise<SemanticScoreRecord | null> {
     await this.init();
-    const row = this.db.prepare('SELECT score_milli_percent FROM semantic_scores WHERE provider_key = ? AND question_id = ? AND normalized_guess = ?').get(providerKey, questionId, normalizedGuess) as { score_milli_percent:number } | undefined;
-    return row?.score_milli_percent ?? null;
+    const row = this.db.prepare('SELECT score_milli_percent, relation_hint FROM semantic_scores WHERE provider_key = ? AND question_id = ? AND normalized_guess = ?').get(providerKey, questionId, normalizedGuess) as { score_milli_percent:number; relation_hint:string } | undefined;
+    return row ? { scoreMilliPercent: row.score_milli_percent, relationHint: row.relation_hint || '' } : null;
   }
-  async putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, scoreMilliPercent: number, createdAt: number): Promise<void> {
+  async putSemanticScore(providerKey: string, questionId: string, normalizedGuess: string, score: SemanticScoreRecord, createdAt: number): Promise<void> {
     await this.init();
-    this.db.prepare(`INSERT INTO semantic_scores VALUES (?, ?, ?, ?, ?) ON CONFLICT(provider_key, question_id, normalized_guess) DO UPDATE SET score_milli_percent=excluded.score_milli_percent, created_at=excluded.created_at`).run(providerKey, questionId, normalizedGuess, scoreMilliPercent, createdAt);
+    this.db.prepare(`INSERT INTO semantic_scores (provider_key, question_id, normalized_guess, score_milli_percent, relation_hint, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(provider_key, question_id, normalized_guess) DO UPDATE SET score_milli_percent=excluded.score_milli_percent, relation_hint=excluded.relation_hint, created_at=excluded.created_at`).run(providerKey, questionId, normalizedGuess, score.scoreMilliPercent, score.relationHint, createdAt);
   }
   async recordAiUsage(record: AiUsageRecord): Promise<void> {
     await this.init();
@@ -380,6 +392,7 @@ function mapGuess(row: GuessRow): GuessRecord {
     displayGuess: row.display_guess,
     scoreMilliPercent: row.score_milli_percent,
     temperature: row.temperature,
+    relationHint: row.relation_hint || '',
     sequence: row.sequence,
     createdAt: row.created_at,
   };

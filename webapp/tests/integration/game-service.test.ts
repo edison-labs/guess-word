@@ -29,13 +29,21 @@ describe('game service integration', () => {
   });
 
   it('reuses a persistent semantic score across games and records feedback', async () => {
-    const scorer: SemanticScorer = { cacheNamespace: 'test:model:v1', scoreNonExact: vi.fn(async () => 61_234) };
+    const scorer: SemanticScorer = {
+      cacheNamespace: 'test:model:v1',
+      scoreNonExact: vi.fn(async () => ({
+        scoreMilliPercent: 61_234,
+        relationHint: '同为寒冷地区动物，但类别不同',
+      })),
+    };
     const { service } = createTestHarness(scorer);
     const first = await service.createGame('动物');
     const second = await service.createGame('动物');
-    await service.submitGuess(first.game.gameId, first.resumeToken, '海豹');
-    await service.submitGuess(second.game.gameId, second.resumeToken, '海豹');
+    const firstResult = await service.submitGuess(first.game.gameId, first.resumeToken, '海豹');
+    const secondResult = await service.submitGuess(second.game.gameId, second.resumeToken, '海豹');
     expect(scorer.scoreNonExact).toHaveBeenCalledTimes(1);
+    expect(firstResult.guesses[0].relationHint).toBe('同为寒冷地区动物，但类别不同');
+    expect(secondResult.guesses[0].relationHint).toBe(firstResult.guesses[0].relationHint);
     await service.submitScoreFeedback(first.game.gameId, first.resumeToken, '海豹', 'too_high');
     expect(await service.getAiStats()).toMatchObject({ cacheEntries: 1, feedbackCount: 1 });
   });

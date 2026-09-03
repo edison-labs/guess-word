@@ -25,6 +25,7 @@ export const guesses = sqliteTable(
     scoreTenths: integer('score_tenths').notNull(),
     scoreMilliPercent: integer('score_milli_percent').notNull().default(0),
     temperature: text('temperature').notNull(),
+    relationHint: text('relation_hint').notNull().default(''),
     sequence: integer('sequence').notNull(),
     createdAt: integer('created_at').notNull(),
   },
@@ -59,6 +60,7 @@ export const semanticScores = sqliteTable('semantic_scores', {
   questionId: text('question_id').notNull(),
   normalizedGuess: text('normalized_guess').notNull(),
   scoreMilliPercent: integer('score_milli_percent').notNull(),
+  relationHint: text('relation_hint').notNull().default(''),
   createdAt: integer('created_at').notNull(),
 }, (table) => [primaryKey({ columns: [table.providerKey, table.questionId, table.normalizedGuess] })]);
 

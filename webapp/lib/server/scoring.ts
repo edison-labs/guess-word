@@ -4,8 +4,13 @@ import type { AiUsageRecord } from './game-store';
 
 export interface SemanticScorer {
   readonly cacheNamespace?: string;
-  scoreNonExact(normalizedGuess: string, question: Question): Promise<number>;
+  scoreNonExact(normalizedGuess: string, question: Question): Promise<number | SemanticScore>;
 }
+
+export type SemanticScore = {
+  scoreMilliPercent: number;
+  relationHint: string;
+};
 
 export class SemanticScorerError extends Error {
   constructor(
@@ -187,21 +192,22 @@ type DeepSeekJudgeConfig = {
   onUsage?: (record: AiUsageRecord) => Promise<void>;
 };
 
-const DEEPSEEK_SCORING_PROMPT = `你是中文联想猜词游戏的关系评审。比较“猜测词”与“目标词”，不仅判断近义程度，也判断两者的功能关系、使用场景、共同属性、外形材料、组成搭配、因果关系，以及通过差异能否提供有效方向。
-只输出 JSON：{"relationship":数字,"similarity":数字,"direction":数字}。三个数字都必须在 0 到 100，并各自保留三位小数：relationship 衡量直接功能、空间、因果、组成或固定搭配关系；similarity 衡量类别、用途、形态、材料和属性的相似点；direction 衡量这个猜测能否通过相似点或明确差异，把玩家带到目标所在的有效范围。
-请按完整区间校准：近义词、别称或极近概念为 75～98；直接功能伙伴、组成物或强场景搭配为 45～75；同一具体子类为 30～60；同属一个宽泛类别但用途不同为 10～30；只共享日常场景或单一属性为 5～20；跨领域且确实找不到关系才为 0～5。只要存在可说清的共同类别、用途、场景或属性，就不要机械返回 0。不同词之间仍要拉开差距，不得把“都属于日常用品”等宽泛关系打成高分。
-使用完整区间，不要习惯性返回整十或以 .000 结尾；小数必须来自语义判断，不能使用随机数。不要输出总分、解释、Markdown 或其他字段。相同输入应给出相同分数。`;
+const DEEPSEEK_SCORING_PROMPT = `你是中文联想猜词游戏的关系评审。比较“猜测词”与“目标词”，不仅判断近义程度，也判断功能关系、使用场景、共同身份/属性、外形材料、组成搭配和因果关系。
+只输出 JSON：{"relationship":数字,"similarity":数字,"direction":数字,"hint":"一句中文提示"}。三个数字均在 0 到 100 并保留三位小数：relationship 衡量直接关系；similarity 衡量类别、身份、用途、形态和属性的相似点；direction 衡量该猜测能否帮玩家缩小范围。
+区间校准：近义词、别称或极近概念 75～98；直接功能伙伴、组成物或强场景搭配 45～75；同一具体身份或子类 35～60；同属宽泛类别但用途不同 10～30；只共享场景或单一属性 5～20；跨领域且确实无关才是 0～5。这些区间指三项加权后的最终体感，不能只把某一项打高而让总分掉出区间。“秦始皇”与“李世民/朱元璋”同为中国古代皇帝，属于同一具体身份，三项加权总分应在 40～60，不得按“几乎无关”评分。只要有可说清的共同类别、用途、场景或属性，就不要机械返回 0。
+hint 用 8～28 个汉字描述两者的关系、相似点或关键不同点，帮玩家缩小范围，例如“同为中国古代皇帝，但所属朝代不同”。hint 严禁出现目标词、目标词的直接别称或任何能唯一揭晓答案的表述；不得只说“有关”或“无关”。
+使用完整区间，不要习惯性返回整十或以 .000 结尾；小数必须来自语义判断，不能随机。相同输入应给出相同结果。不要输出 Markdown 或其他字段。`;
 
 export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
   readonly cacheNamespace: string;
-  private readonly resultCache = new Map<string, number>();
+  private readonly resultCache = new Map<string, SemanticScore>();
 
   constructor(private readonly config: DeepSeekJudgeConfig) {
-    this.cacheNamespace = `deepseek:${config.model}:v5`;
+    this.cacheNamespace = `deepseek:${config.model}:v6`;
   }
 
-  async scoreNonExact(normalizedGuess: string, question: Question): Promise<number> {
-    const resultKey = `${this.config.model}:v5:${question.id}:${normalizedGuess}`;
+  async scoreNonExact(normalizedGuess: string, question: Question): Promise<SemanticScore> {
+    const resultKey = `${this.config.model}:v6:${question.id}:${normalizedGuess}`;
     const cached = this.resultCache.get(resultKey);
     if (cached !== undefined) return cached;
 
@@ -232,7 +238,7 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
           response_format: { type: 'json_object' },
           thinking: { type: 'disabled' },
           temperature: 0,
-          max_tokens: 96,
+          max_tokens: 160,
           stream: false,
         }),
         signal: controller.signal,
@@ -265,7 +271,7 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
       }
 
       const content = body.choices?.[0]?.message?.content;
-      if (typeof content !== 'string' || content.length > 256) {
+      if (typeof content !== 'string' || content.length > 512) {
         throw new SemanticScorerError(
           'DeepSeek returned an invalid scoring response.',
           'unavailable',
@@ -287,6 +293,7 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
         relationship?: unknown;
         similarity?: unknown;
         direction?: unknown;
+        hint?: unknown;
       } | null;
       const values = dimensions
         ? [dimensions.relationship, dimensions.similarity, dimensions.direction]
@@ -311,6 +318,10 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
       const score = capNonExactScore(
         Math.round((relationship * 0.45 + similarity * 0.35 + direction * 0.2) * 1000),
       );
+      const result: SemanticScore = {
+        scoreMilliPercent: score,
+        relationHint: sanitizeRelationHint(dimensions?.hint, question.answer, score),
+      };
       const usage = body.usage;
       if (usage && this.config.onUsage) {
         const cached = safeTokenCount(usage.prompt_cache_hit_tokens);
@@ -333,8 +344,8 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
         }).catch(() => undefined);
       }
       if (this.resultCache.size > 2_000) this.resultCache.clear();
-      this.resultCache.set(resultKey, score);
-      return score;
+      this.resultCache.set(resultKey, result);
+      return result;
     } catch (error) {
       if (error instanceof SemanticScorerError) throw error;
       if (controller.signal.aborted) {
@@ -345,6 +356,29 @@ export class DeepSeekJudgeSemanticScorer implements SemanticScorer {
       clearTimeout(timeout);
     }
   }
+}
+
+export function fallbackRelationHint(scoreMilliPercent: number): string {
+  if (scoreMilliPercent >= 85_000) return '含义和指向已经非常接近';
+  if (scoreMilliPercent >= 65_000) return '存在强相关关系，方向已很接近';
+  if (scoreMilliPercent >= 45_000) return '有明显共同点，可以沿此方向继续';
+  if (scoreMilliPercent >= 25_000) return '共享部分身份、属性或使用场景';
+  if (scoreMilliPercent >= 10_000) return '属于相近大类，但关键特征不同';
+  return '目前共同点较少，建议换个方向';
+}
+
+function sanitizeRelationHint(value: unknown, answer: string, scoreMilliPercent: number): string {
+  if (typeof value !== 'string') return fallbackRelationHint(scoreMilliPercent);
+  const hint = value.replace(/\s+/g, '').trim();
+  const length = Array.from(hint).length;
+  if (
+    length < 4 ||
+    length > 40 ||
+    hint.normalize('NFKC').includes(answer.normalize('NFKC').trim())
+  ) {
+    return fallbackRelationHint(scoreMilliPercent);
+  }
+  return hint;
 }
 
 export type ScorerEnvironment = {

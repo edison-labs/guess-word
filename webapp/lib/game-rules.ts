@@ -38,12 +38,12 @@ export function scoreToTemperature(scoreMilliPercent: number): Temperature {
     throw new RangeError('Score must be an integer from 0 to 100000.');
   }
   if (scoreMilliPercent === 100_000) return '猜中';
-  if (scoreMilliPercent >= 95_000) return '非常接近';
-  if (scoreMilliPercent >= 80_000) return '高度相关';
-  if (scoreMilliPercent >= 60_000) return '关联较强';
-  if (scoreMilliPercent >= 40_000) return '有些关联';
-  if (scoreMilliPercent >= 20_000) return '关联较弱';
-  return '几乎无关';
+  if (scoreMilliPercent >= 85_000) return '非常接近';
+  if (scoreMilliPercent >= 65_000) return '强关系';
+  if (scoreMilliPercent >= 45_000) return '明显相关';
+  if (scoreMilliPercent >= 25_000) return '方向接近';
+  if (scoreMilliPercent >= 10_000) return '同类线索';
+  return '关系较远';
 }
 
 export function scoreMilliPercentToPercent(scoreMilliPercent: number): number {

@@ -82,7 +82,11 @@ describe('API controllers', () => {
       body.game.gameId,
     );
     expect(guess.status).toBe(200);
-    expect(((await guess.json()) as GameResponse).game.guesses[0]).toMatchObject({ guess: '海豹', temperature: '高度相关' });
+    expect(((await guess.json()) as GameResponse).game.guesses[0]).toMatchObject({
+      guess: '海豹',
+      temperature: '非常接近',
+      relationHint: expect.any(String),
+    });
   });
 
   it.each([

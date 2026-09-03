@@ -49,7 +49,8 @@ describe('NodeSqliteGameStore', () => {
           normalizedGuess: '海豹',
           displayGuess: '海豹',
           scoreMilliPercent: 88_719,
-          temperature: '高度相关',
+          temperature: '非常接近',
+          relationHint: '同为寒冷地区动物，但类别不同',
           createdAt: 2_100,
         },
         false,
@@ -93,10 +94,10 @@ describe('NodeSqliteGameStore', () => {
   it('persists AI cache, usage totals and score feedback', async () => {
     const { store } = createStore();
     await store.createGame(game());
-    await store.putSemanticScore('deepseek:model:v4', 'animal_penguin', '海豹', 72_345, 2_000);
+    await store.putSemanticScore('deepseek:model:v4', 'animal_penguin', '海豹', { scoreMilliPercent: 72_345, relationHint: '同为寒冷地区动物' }, 2_000);
     await store.recordAiUsage({ id: 'usage-1', providerKey: 'deepseek:model:v4', questionId: 'animal_penguin', normalizedGuess: '海豹', promptTokens: 100, cachedPromptTokens: 80, completionTokens: 12, latencyMs: 300, estimatedCostMicrousd: 7, createdAt: 2_000 });
     await store.recordScoreFeedback('game-1', '海豹', 'too_low', 2_100);
-    expect(await store.getSemanticScore('deepseek:model:v4', 'animal_penguin', '海豹')).toBe(72_345);
+    expect(await store.getSemanticScore('deepseek:model:v4', 'animal_penguin', '海豹')).toEqual({ scoreMilliPercent: 72_345, relationHint: '同为寒冷地区动物' });
     expect(await store.getAiStats()).toEqual({ requests: 1, promptTokens: 100, cachedPromptTokens: 80, completionTokens: 12, estimatedCostUsd: 0.000007, cacheEntries: 1, feedbackCount: 1 });
   });
 });
