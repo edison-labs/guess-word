@@ -66,6 +66,7 @@ export type PublicGame = {
 
 export type CreateGameRequest = {
   category: GameCategory;
+  excludeGameIds?: string[];
 };
 
 export type CreateGameResponse = {

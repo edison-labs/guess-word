@@ -39,7 +39,7 @@ type GameServiceOptions = {
   store: GameStore;
   scorer: SemanticScorer;
   now?: () => number;
-  questionSelector?: (category: GameCategory) => Question;
+  questionSelector?: (category: GameCategory, excludedQuestionIds: ReadonlySet<string>) => Question;
   idGenerator?: () => string;
   tokenGenerator?: () => string;
   claimTokenGenerator?: () => string;
@@ -50,7 +50,7 @@ const GUESS_CLAIM_TTL_MS = 15_000;
 
 export class GameService {
   private readonly now: () => number;
-  private readonly questionSelector: (category: GameCategory) => Question;
+  private readonly questionSelector: (category: GameCategory, excludedQuestionIds: ReadonlySet<string>) => Question;
   private readonly idGenerator: () => string;
   private readonly tokenGenerator: () => string;
   private readonly claimTokenGenerator: () => string;
@@ -58,15 +58,32 @@ export class GameService {
 
   constructor(private readonly options: GameServiceOptions) {
     this.now = options.now ?? (() => Date.now());
-    this.questionSelector = options.questionSelector ?? ((category) => selectRandomQuestion(category));
+    this.questionSelector =
+      options.questionSelector ??
+      ((category, excludedQuestionIds) =>
+        selectRandomQuestion(category, undefined, excludedQuestionIds));
     this.idGenerator = options.idGenerator ?? (() => crypto.randomUUID());
     this.tokenGenerator = options.tokenGenerator ?? randomToken;
     this.claimTokenGenerator = options.claimTokenGenerator ?? randomToken;
     this.scoringMode = options.scoringMode ?? 'test';
   }
 
-  async createGame(category: GameCategory): Promise<CreateGameResponse> {
-    const question = this.questionSelector(category);
+  async createGame(
+    category: GameCategory,
+    excludeGameIds: readonly string[] = [],
+  ): Promise<CreateGameResponse> {
+    const excludedGames = await Promise.all(
+      excludeGameIds.slice(0, 12).map((gameId) => this.options.store.getGame(gameId)),
+    );
+    const excludedQuestionIds = new Set(
+      excludedGames
+        .filter(
+          (game): game is GameRecord =>
+            game !== null && game.category === category && game.status !== 'active',
+        )
+        .map((game) => game.questionId),
+    );
+    const question = this.questionSelector(category, excludedQuestionIds);
     if (question.category !== category) {
       throw new GameError('INTERNAL_ERROR', '所选分类暂时没有可用题目。', 500);
     }

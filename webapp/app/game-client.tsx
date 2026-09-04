@@ -134,13 +134,24 @@ export default function GameClient() {
     });
   }, []);
 
-  const createNewGame = useCallback(async (category: GameCategory) => {
+  const createNewGame = useCallback(async (
+    category: GameCategory,
+    additionalExcludeGameIds: readonly string[] = [],
+  ) => {
     setBusy('new');
     setMessage('');
     try {
+      const excludeGameIds = [
+        ...new Set([
+          ...additionalExcludeGameIds,
+          ...stats.recentGames
+            .filter((item) => item.category === category)
+            .map((item) => item.gameId),
+        ]),
+      ].slice(0, 12);
       const created = await apiRequest<CreateGameResponse>('/api/games', {
         method: 'POST',
-        body: JSON.stringify({ category }),
+        body: JSON.stringify({ category, excludeGameIds }),
       });
       const nextSession = {
         gameId: created.game.gameId,
@@ -163,7 +174,7 @@ export default function GameClient() {
       setLoading(false);
       setBusy(null);
     }
-  }, [acceptGame]);
+  }, [acceptGame, stats.recentGames]);
 
   const createDailyGame = useCallback(async () => {
     setBusy('new');
@@ -389,7 +400,7 @@ export default function GameClient() {
       acceptGame(result.game);
       localStorage.removeItem(SESSION_KEY);
       if (target.kind === 'daily') await createDailyGame();
-      else await createNewGame(target.category);
+      else await createNewGame(target.category, [game.gameId]);
     } catch (error) {
       setMessage(getFriendlyError(error));
       setBusy(null);

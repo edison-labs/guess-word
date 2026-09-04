@@ -24,6 +24,18 @@ describe('question bank', () => {
     }
   });
 
+  it('avoids recently used questions and falls back only when the pool is exhausted', () => {
+    const first = selectRandomQuestion('动物', 0);
+    const next = selectRandomQuestion('动物', 0, new Set([first.id]));
+    expect(next.id).not.toBe(first.id);
+    expect(next.category).toBe('动物');
+
+    const allAnimalIds = new Set(
+      QUESTIONS.filter((item) => item.category === '动物').map((item) => item.id),
+    );
+    expect(selectRandomQuestion('动物', 0, allAnimalIds).id).toBe(first.id);
+  });
+
   it('detects structural failures', () => {
     const broken = [
       ...QUESTIONS.slice(0, 99),

@@ -21,11 +21,12 @@ export async function createGameController(
   try {
     assertSameOrigin(request);
     const body = await parseJsonObject(request);
-    assertOnlyKeys(body, ['category']);
+    assertOnlyKeys(body, ['category', 'excludeGameIds']);
     if (!isGameCategory(body.category)) {
       throw invalidRequest('请选择有效的题目分类。');
     }
-    return json(await service.createGame(body.category), 201);
+    const excludeGameIds = parseExcludeGameIds(body.excludeGameIds);
+    return json(await service.createGame(body.category, excludeGameIds), 201);
   } catch (error) {
     return errorResponse(error);
   }
@@ -176,6 +177,22 @@ function assertOnlyKeys(body: Record<string, unknown>, allowed: readonly string[
   if (Object.keys(body).some((key) => !allowed.includes(key))) {
     throw invalidRequest('请求包含不支持的字段。');
   }
+}
+
+function parseExcludeGameIds(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (
+    !Array.isArray(value) ||
+    value.length > 12 ||
+    value.some(
+      (gameId) =>
+        typeof gameId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(gameId),
+    )
+  ) {
+    throw invalidRequest('最近题目记录格式无效。');
+  }
+  return [...new Set(value)];
 }
 
 function assertSameOrigin(request: Request): void {

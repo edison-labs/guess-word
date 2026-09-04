@@ -294,11 +294,14 @@ export function getQuestionById(id: string): Question | undefined {
 export function selectRandomQuestion(
   category?: GameCategory,
   randomValue: number = crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32,
+  excludedQuestionIds: ReadonlySet<string> = new Set(),
 ): Question {
   const active = QUESTIONS.filter((item) => item.active && (!category || item.category === category));
   if (active.length === 0) throw new Error('No active questions are configured.');
-  const index = Math.min(active.length - 1, Math.floor(Math.max(0, randomValue) * active.length));
-  return active[index];
+  const eligible = active.filter((item) => !excludedQuestionIds.has(item.id));
+  const pool = eligible.length > 0 ? eligible : active;
+  const index = Math.min(pool.length - 1, Math.floor(Math.max(0, randomValue) * pool.length));
+  return pool[index];
 }
 
 export function selectDailyQuestion(date: string): Question {

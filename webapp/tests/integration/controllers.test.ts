@@ -51,6 +51,7 @@ describe('API controllers', () => {
     ['missing category', {}],
     ['unknown category', { category: '体育' }],
     ['extra forged fields', { category: '动物', questionId: 'animal_penguin' }],
+    ['invalid recent game ids', { category: '动物', excludeGameIds: ['not-a-game-id'] }],
   ])('rejects create game with %s', async (_label, payload) => {
     const { service } = createTestHarness();
     const response = await createGameController(
@@ -63,6 +64,24 @@ describe('API controllers', () => {
     );
     expect(response.status).toBe(400);
     expect(((await response.json()) as ApiErrorBody).error.code).toBe('INVALID_REQUEST');
+  });
+
+  it('accepts up to twelve opaque recent game ids for repeat prevention', async () => {
+    const { service } = createTestHarness();
+    const excludeGameIds = Array.from(
+      { length: 12 },
+      (_, index) =>
+        '00000000-0000-4000-8000-' + String(index + 100).padStart(12, '0'),
+    );
+    const response = await createGameController(
+      new Request('http://localhost/api/games', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: '动物', excludeGameIds }),
+      }),
+      service,
+    );
+    expect(response.status).toBe(201);
   });
 
   it('restores and guesses through the HTTP contract', async () => {

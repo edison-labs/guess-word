@@ -37,7 +37,9 @@ async function createRuntimeGameService(): Promise<GameService> {
     store,
     scorer,
     scoringMode: env.SEMANTIC_PROVIDER === 'deterministic' ? 'test' : 'semantic',
-    questionSelector: (category) =>
-      fixedQuestion?.category === category ? fixedQuestion : selectRandomQuestion(category),
+    questionSelector: (category, excludedQuestionIds) =>
+      fixedQuestion?.category === category
+        ? fixedQuestion
+        : selectRandomQuestion(category, undefined, excludedQuestionIds),
   });
 }

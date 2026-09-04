@@ -42,7 +42,8 @@ async function createRuntimeGameService(): Promise<GameService> {
     store,
     scorer,
     scoringMode: 'semantic',
-    questionSelector: (category) => selectRandomQuestion(category),
+    questionSelector: (category, excludedQuestionIds) =>
+      selectRandomQuestion(category, undefined, excludedQuestionIds),
   });
 }
 

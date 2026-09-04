@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GameError } from '../../lib/server/game-service';
+import { GameError, GameService } from '../../lib/server/game-service';
+import { MemoryGameStore } from '../../lib/server/game-store';
 import type { SemanticScorer } from '../../lib/server/scoring';
 import { DeterministicSemanticScorer, SemanticScorerError } from '../../lib/server/scoring';
 import { createTestHarness } from '../helpers';
@@ -26,6 +27,22 @@ describe('game service integration', () => {
     const { service } = createTestHarness();
     const created = await service.createDailyGame();
     expect(created.game).toMatchObject({ mode: 'daily', dailyDate: '2026-08-30', status: 'active' });
+  });
+
+  it('excludes recently completed game questions when creating another game', async () => {
+    const store = new MemoryGameStore();
+    const service = new GameService({
+      store,
+      scorer: new DeterministicSemanticScorer(),
+    });
+    const first = await service.createGame('动物');
+    await service.abandon(first.game.gameId, first.resumeToken);
+    const second = await service.createGame('动物', [first.game.gameId]);
+    const firstRecord = await store.getGame(first.game.gameId);
+    const secondRecord = await store.getGame(second.game.gameId);
+
+    expect(firstRecord?.questionId).not.toBe(secondRecord?.questionId);
+    expect(second.game.category).toBe('动物');
   });
 
   it('keeps answer length private until six unsuccessful guesses', async () => {
