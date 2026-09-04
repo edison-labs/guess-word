@@ -34,7 +34,10 @@ const CATEGORY_DESCRIPTIONS: Record<GameCategory, string> = {
   体育圈: '运动员、教练与体坛名将',
 };
 
-type PendingStart = { kind: 'daily' } | { kind: 'category'; category: GameCategory };
+type PendingStart =
+  | { kind: 'daily' }
+  | { kind: 'category'; category: GameCategory }
+  | { kind: 'challenge'; sourceGameId: string };
 
 class ApiClientError extends Error {
   constructor(readonly body: ApiErrorBody, readonly status: number) {
@@ -97,6 +100,7 @@ export default function GameClient() {
   const [pendingStart, setPendingStart] = useState<PendingStart | null>(null);
   const [shareMessage, setShareMessage] = useState('');
   const [shareFallback, setShareFallback] = useState('');
+  const [challengeSourceGameId, setChallengeSourceGameId] = useState<string | null>(null);
   const booted = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelAbandonRef = useRef<HTMLButtonElement>(null);
@@ -199,9 +203,43 @@ export default function GameClient() {
     }
   }, [acceptGame]);
 
-  const bootGame = useCallback(async () => {
+  const createChallengeGame = useCallback(async (sourceGameId: string) => {
+    setBusy('new');
+    setMessage('');
+    try {
+      const created = await apiRequest<CreateGameResponse>('/api/games/challenge', {
+        method: 'POST',
+        body: JSON.stringify({ sourceGameId }),
+      });
+      const nextSession = { gameId: created.game.gameId, resumeToken: created.resumeToken };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
+      setSession(nextSession);
+      acceptGame(created.game);
+      setInput('');
+      setSortMode('score');
+      setLatestSequence(null);
+      setFeedbackSent(new Set());
+      setShowHome(false);
+      setChallengeSourceGameId(null);
+      removeChallengeFromUrl();
+      setShareMessage('');
+      setShareFallback('');
+      requestAnimationFrame(() => inputRef.current?.focus());
+    } catch (error) {
+      setMessage(getFriendlyError(error));
+    } finally {
+      setLoading(false);
+      setBusy(null);
+    }
+  }, [acceptGame]);
+
+  const bootGame = useCallback(async (sourceGameId: string | null = null) => {
     setLoading(true);
     setMessage('');
+    if (sourceGameId) {
+      setChallengeSourceGameId(sourceGameId);
+      setShowHome(true);
+    }
     const stored = readSession();
     if (stored) {
       try {
@@ -242,7 +280,7 @@ export default function GameClient() {
     if (booted.current) return;
     booted.current = true;
     setStats(parseLocalStats(localStorage.getItem(STATS_KEY)));
-    void bootGame();
+    void bootGame(readChallengeGameId());
   }, [bootGame]);
 
   useEffect(() => {
@@ -369,6 +407,12 @@ export default function GameClient() {
     setMessage('');
   }
 
+  function dismissChallenge() {
+    setChallengeSourceGameId(null);
+    removeChallengeFromUrl();
+    setMessage('');
+  }
+
   function requestStart(target: PendingStart) {
     if (target.kind === 'daily' && todayDailyResult) {
       setMessage('今天的每日挑战已经完成，战绩已保存在上方。明天再来！');
@@ -383,6 +427,7 @@ export default function GameClient() {
       return;
     }
     if (target.kind === 'daily') void createDailyGame();
+    else if (target.kind === 'challenge') void createChallengeGame(target.sourceGameId);
     else void createNewGame(target.category);
   }
 
@@ -400,6 +445,7 @@ export default function GameClient() {
       acceptGame(result.game);
       localStorage.removeItem(SESSION_KEY);
       if (target.kind === 'daily') await createDailyGame();
+      else if (target.kind === 'challenge') await createChallengeGame(target.sourceGameId);
       else await createNewGame(target.category, [game.gameId]);
     } catch (error) {
       setMessage(getFriendlyError(error));
@@ -421,26 +467,31 @@ export default function GameClient() {
   async function shareResult() {
     if (!game || game.status === 'active') return;
     const bars = game.guesses.slice(-8).map((item) => scoreBlock(item.score)).join('');
-    const text = [
-      `GuessWord ${game.mode === 'daily' ? `每日挑战 ${game.dailyDate}` : game.category}`,
+    const challengeUrl = new URL(location.origin + location.pathname);
+    challengeUrl.searchParams.set('challenge', game.gameId);
+    const shareText = [
+      `我完成了一道 GuessWord ${game.mode === 'daily' ? `每日挑战` : game.category}题`,
       `${game.status === 'won' ? `第 ${game.guessCount} 次猜中` : `挑战结束 · ${game.guessCount} 次猜测`} · 提示 ${game.hintCount}/${MAX_HINT_COUNT}`,
       bars || '还没有猜测',
-      `来试试 AI 联想猜词：${location.href}`,
     ].join('\n');
+    const clipboardText = `${shareText}\n你也来挑战同一道题（答案不会提前显示）：\n${challengeUrl.toString()}`;
     setShareMessage('');
     setShareFallback('');
     try {
       const nativeShare = window.isSecureContext && typeof navigator.share === 'function';
-      setShareMessage(nativeShare ? '正在打开系统分享…' : '正在复制战绩…');
-      if (nativeShare) await navigator.share({ title: 'GuessWord', text, url: location.href });
-      else await copyText(text);
-      setShareMessage(nativeShare ? '战绩已分享。' : '战绩已复制，可以粘贴给朋友了。');
+      setShareMessage(nativeShare ? '正在打开系统分享…' : '正在复制同题挑战链接…');
+      if (nativeShare) {
+        await navigator.share({ title: '来挑战这道 GuessWord', text: shareText, url: challengeUrl.toString() });
+      } else {
+        await copyText(clipboardText);
+      }
+      setShareMessage(nativeShare ? '同题挑战已分享。' : '同题挑战链接已复制，可以发给朋友了。');
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') {
         setShareMessage('已取消分享。');
       } else {
         setShareMessage('浏览器没有允许自动复制，请长按或全选下方内容。');
-        setShareFallback(text);
+        setShareFallback(clipboardText);
       }
     }
   }
@@ -484,6 +535,28 @@ export default function GameClient() {
             </div>
           ) : !game || showHome ? (
             <div className="category-picker">
+              {challengeSourceGameId && (
+                <section className="challenge-invite" aria-labelledby="challenge-title">
+                  <div>
+                    <p className="section-kicker">好友同题挑战</p>
+                    <h2 id="challenge-title">有人邀你猜同一个隐藏词</h2>
+                    <p>会为你创建独立对局，答案和对方的猜词记录都不会提前显示。</p>
+                  </div>
+                  <div className="challenge-actions">
+                    <button
+                      className="primary"
+                      type="button"
+                      disabled={busy === 'new'}
+                      onClick={() => requestStart({ kind: 'challenge', sourceGameId: challengeSourceGameId })}
+                    >
+                      {busy === 'new' ? '正在进入…' : '开始同题挑战'}
+                    </button>
+                    <button className="secondary" type="button" disabled={busy === 'new'} onClick={dismissChallenge}>
+                      自己选题
+                    </button>
+                  </div>
+                </section>
+              )}
               <div className="category-heading">
                 <p className="section-kicker">开始新一局</p>
                 <h1 id="game-title">选择题目分类</h1>
@@ -592,13 +665,13 @@ export default function GameClient() {
                     再玩一局
                   </button>
                   <button className="secondary share-result" type="button" onClick={() => void shareResult()}>
-                    分享战绩
+                    分享这道题
                   </button>
                   {shareMessage && <p className="share-message" role="status">{shareMessage}</p>}
                   {shareFallback && (
                     <textarea
                       className="share-fallback"
-                      aria-label="可复制的战绩文本"
+                      aria-label="可复制的同题挑战内容"
                       readOnly
                       value={shareFallback}
                       onFocus={(event) => event.currentTarget.select()}
@@ -721,11 +794,15 @@ export default function GameClient() {
         }}>
           <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="switch-title" aria-describedby="switch-description">
             <p className="section-kicker">当前还有一局进行中</p>
-            <h2 id="switch-title">放弃当前进度并开始新题？</h2>
+            <h2 id="switch-title">
+              {pendingStart.kind === 'challenge' ? '放弃当前进度并接受好友挑战？' : '放弃当前进度并开始新题？'}
+            </h2>
             <p id="switch-description">当前猜词记录会结算为未猜中，之后不能继续。</p>
             <div className="dialog-actions">
               <button className="secondary" type="button" onClick={() => setPendingStart(null)}>取消</button>
-              <button className="danger" type="button" onClick={() => void confirmStartNewGame()}>放弃并开始</button>
+              <button className="danger" type="button" onClick={() => void confirmStartNewGame()}>
+                {pendingStart.kind === 'challenge' ? '放弃并挑战' : '放弃并开始'}
+              </button>
             </div>
           </section>
         </div>
@@ -780,6 +857,20 @@ function getChinaDate(date: Date): string {
     month: '2-digit',
     day: '2-digit',
   }).format(date);
+}
+
+function readChallengeGameId(): string | null {
+  const value = new URL(location.href).searchParams.get('challenge');
+  return value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : null;
+}
+
+function removeChallengeFromUrl(): void {
+  const url = new URL(location.href);
+  if (!url.searchParams.has('challenge')) return;
+  url.searchParams.delete('challenge');
+  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
 function formatScore(score: number): string {

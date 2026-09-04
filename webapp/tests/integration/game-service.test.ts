@@ -45,6 +45,20 @@ describe('game service integration', () => {
     expect(second.game.category).toBe('动物');
   });
 
+  it('creates an independent game with the same question for a shared challenge', async () => {
+    const { service, store } = createTestHarness();
+    const source = await service.createGame('动物');
+    const challenge = await service.createChallengeGame(source.game.gameId);
+    const sourceRecord = await store.getGame(source.game.gameId);
+    const challengeRecord = await store.getGame(challenge.game.gameId);
+
+    expect(challenge.game.gameId).not.toBe(source.game.gameId);
+    expect(challenge.resumeToken).not.toBe(source.resumeToken);
+    expect(challengeRecord?.questionId).toBe(sourceRecord?.questionId);
+    expect(challenge.game.status).toBe('active');
+    expect(challenge.game).not.toHaveProperty('answer');
+  });
+
   it('keeps answer length private until six unsuccessful guesses', async () => {
     const { service } = createTestHarness();
     const created = await service.createGame('动物');

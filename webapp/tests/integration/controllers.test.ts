@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   abandonGameController,
+  createChallengeGameController,
   createGameController,
   resetRateLimitsForTests,
   restoreGameController,
@@ -82,6 +83,38 @@ describe('API controllers', () => {
       service,
     );
     expect(response.status).toBe(201);
+  });
+
+  it('starts a private new game from a valid shared challenge', async () => {
+    const { harness, body: source } = await createViaApi();
+    const response = await createChallengeGameController(
+      new Request('http://localhost/api/games/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceGameId: source.game.gameId }),
+      }),
+      harness.service,
+    );
+    const body = (await response.json()) as CreateGameResponse;
+
+    expect(response.status).toBe(201);
+    expect(body.game.gameId).not.toBe(source.game.gameId);
+    expect(body.game).not.toHaveProperty('answer');
+    expect(JSON.stringify(body.game)).not.toContain('animal_penguin');
+  });
+
+  it('rejects an invalid or missing shared challenge', async () => {
+    const { service } = createTestHarness();
+    const invalid = await createChallengeGameController(
+      new Request('http://localhost/api/games/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceGameId: 'forged' }),
+      }),
+      service,
+    );
+    expect(invalid.status).toBe(404);
+    expect(((await invalid.json()) as ApiErrorBody).error.code).toBe('GAME_NOT_FOUND');
   });
 
   it('restores and guesses through the HTTP contract', async () => {

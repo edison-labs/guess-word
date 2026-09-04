@@ -51,6 +51,11 @@ button, summary { cursor: pointer; }
 
 .game-shell { min-height: 32rem; padding: clamp(.9rem, 2.5vw, 1.35rem); border: 1px solid rgb(211 194 176 / 78%); border-radius: 1.05rem; background: rgb(255 253 249 / 96%); box-shadow: 0 16px 44px rgb(87 55 27 / 9%), 0 2px 8px rgb(87 55 27 / 4%); }
 .category-picker { display: grid; min-height: 30rem; align-content: center; }
+.challenge-invite { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.1rem; padding: 1rem; border: 1px solid #e7b58e; border-left: 4px solid var(--accent); border-radius: .85rem; background: linear-gradient(135deg, #fff3e7, #fffaf5); box-shadow: 0 8px 22px rgb(161 57 6 / 9%); }
+.challenge-invite h2 { margin-top: .12rem; color: var(--accent-dark); }
+.challenge-invite p:last-child { max-width: 31rem; margin: .38rem 0 0; color: #735746; font-size: .72rem; line-height: 1.5; }
+.challenge-actions { display: flex; flex: none; gap: .45rem; }
+.challenge-actions button { min-height: 42px; padding-inline: .8rem; border-radius: .62rem; font-size: .72rem; font-weight: 850; }
 .category-heading { max-width: 32rem; }
 .category-heading h1 { margin-top: .25rem; }
 .category-heading > p:last-child { margin: .55rem 0 0; color: var(--muted); line-height: 1.55; }
@@ -209,6 +214,9 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   .home-link { padding-inline: .65rem; }
   .game-shell { padding: 1rem .8rem 1.4rem; border-radius: .9rem; box-shadow: 0 12px 32px rgb(87 55 27 / 9%); }
   .category-picker { min-height: 32rem; align-content: start; padding-top: 1.25rem; }
+  .challenge-invite { display: grid; }
+  .challenge-actions { width: 100%; }
+  .challenge-actions button:first-child { flex: 1; }
   .category-grid { grid-template-columns: 1fr 1fr; gap: .55rem; margin-top: 1.15rem; }
   .category-option { min-height: 6.6rem; padding: .75rem; }
   .local-record { display: none; }

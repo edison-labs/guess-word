@@ -95,6 +95,21 @@ export class GameService {
     return this.createGameForQuestion(selectDailyQuestion(date), 'daily', date);
   }
 
+  async createChallengeGame(sourceGameId: string): Promise<CreateGameResponse> {
+    if (!isUuid(sourceGameId)) {
+      throw new GameError('GAME_NOT_FOUND', '这道分享题不存在或已失效。', 404);
+    }
+    const sourceGame = await this.options.store.getGame(sourceGameId);
+    if (!sourceGame) {
+      throw new GameError('GAME_NOT_FOUND', '这道分享题不存在或已失效。', 404);
+    }
+    const question = getQuestionById(sourceGame.questionId);
+    if (!question) {
+      throw new GameError('GAME_NOT_FOUND', '这道分享题不存在或已失效。', 404);
+    }
+    return this.createGameForQuestion(question, 'random', null);
+  }
+
   private async createGameForQuestion(question: Question, mode: 'random' | 'daily', dailyDate: string | null): Promise<CreateGameResponse> {
     const resumeToken = this.tokenGenerator();
     const game: GameRecord = {

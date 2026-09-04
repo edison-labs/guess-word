@@ -73,8 +73,8 @@ test('complete game, recovery, new game, and abandon flow', async ({ page }) => 
 
   await expect(page.locator('.result-stats')).not.toContainText('最佳联想');
   await expect(page.locator('.result-stats')).not.toContainText('最接近的一次');
-  await page.getByRole('button', { name: '分享战绩' }).click();
-  await expect(page.locator('.share-message')).toContainText(/正在打开系统分享|正在复制战绩|战绩已|浏览器没有允许自动复制/);
+  await page.getByRole('button', { name: '分享这道题' }).click();
+  await expect(page.locator('.share-message')).toContainText(/正在打开系统分享|正在复制同题挑战链接|同题挑战|浏览器没有允许自动复制/);
   await page.getByRole('button', { name: '再玩一局' }).click();
   await expect(page.getByRole('heading', { name: '选择题目分类' })).toBeVisible();
   await page.getByRole('button', { name: /^动物/ }).click();
@@ -96,6 +96,30 @@ test('complete game, recovery, new game, and abandon flow', async ({ page }) => 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
   expect(consoleErrors).toEqual([]);
+});
+
+test('opens a shared link as an independent challenge of the same question', async ({ page }) => {
+  await page.getByRole('button', { name: /^动物/ }).click();
+  await page.getByRole('button', { name: '查看答案' }).click();
+  await page.getByRole('button', { name: '结束并查看' }).click();
+  const sourceGameId = await page.evaluate(() => {
+    const session = JSON.parse(localStorage.getItem('guessword.session.v1') ?? '{}') as { gameId?: string };
+    return session.gameId;
+  });
+  expect(sourceGameId).toBeTruthy();
+
+  await page.goto(`/?challenge=${sourceGameId}`);
+  await expect(page.getByRole('heading', { name: '有人邀你猜同一个隐藏词' })).toBeVisible();
+  await page.getByRole('button', { name: '开始同题挑战' }).click();
+  await expect(page.getByRole('heading', { name: '动物 · 猜隐藏词' })).toBeVisible();
+  await expect(page.locator('.score-grid').filter({ hasText: '已猜' })).toContainText('0 次');
+  await expect(page).not.toHaveURL(/challenge=/);
+
+  const challengeGameId = await page.evaluate(() => {
+    const session = JSON.parse(localStorage.getItem('guessword.session.v1') ?? '{}') as { gameId?: string };
+    return session.gameId;
+  });
+  expect(challengeGameId).not.toBe(sourceGameId);
 });
 
 test('validation, keyboard focus, and accessibility states', async ({ page }) => {

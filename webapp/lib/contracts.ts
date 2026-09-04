@@ -69,6 +69,10 @@ export type CreateGameRequest = {
   excludeGameIds?: string[];
 };
 
+export type CreateChallengeGameRequest = {
+  sourceGameId: string;
+};
+
 export type CreateGameResponse = {
   game: PublicGame;
   resumeToken: string;

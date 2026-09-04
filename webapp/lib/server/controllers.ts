@@ -43,6 +43,23 @@ export async function createDailyGameController(request: Request, service: GameS
   }
 }
 
+export async function createChallengeGameController(
+  request: Request,
+  service: GameService,
+): Promise<Response> {
+  try {
+    assertSameOrigin(request);
+    const body = await parseJsonObject(request);
+    assertOnlyKeys(body, ['sourceGameId']);
+    if (typeof body.sourceGameId !== 'string') {
+      throw invalidRequest('分享题目编号无效。');
+    }
+    return json(await service.createChallengeGame(body.sourceGameId), 201);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
 export async function restoreGameController(
   request: Request,
   service: GameService,
