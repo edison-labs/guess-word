@@ -162,6 +162,15 @@ export async function viewerController(request: Request, accounts: AccountServic
   }
 }
 
+export async function questionProgressController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    const context = await accounts.ensureViewer(request);
+    return withCookie(json(await accounts.getQuestionProgress(context.session.playerId)), context.setCookie);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
 export async function requestLoginCodeController(request: Request, accounts: AccountService): Promise<Response> {
   try {
     assertSameOrigin(request);

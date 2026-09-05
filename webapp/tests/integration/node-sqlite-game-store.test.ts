@@ -92,6 +92,23 @@ describe('NodeSqliteGameStore', () => {
     expect(await store.useHint('game-1')).toBe('finished');
   });
 
+  it('atomically resumes one daily game and persists category progress', async () => {
+    const { store } = createStore();
+    const daily = { ...game('daily-1'), ownerId: 'player-1', mode: 'daily' as const, dailyDate: '2026-09-05' };
+    expect((await store.createOrResumeDailyGame(daily)).id).toBe('daily-1');
+    const resumed = await store.createOrResumeDailyGame({ ...daily, id: 'daily-2', resumeTokenHash: 'new-hash' });
+    expect(resumed).toMatchObject({ id: 'daily-1', resumeTokenHash: 'hash' });
+    expect(await store.hasGameAccessToken('daily-1', 'new-hash')).toBe(true);
+    expect(await store.getGame('daily-2')).toBeNull();
+
+    await store.recordQuestionSeen('player-1', '动物', 'animal_penguin', 1_000);
+    await store.recordQuestionSeen('player-1', '动物', 'animal_panda', 2_000);
+    expect(await store.getSeenQuestionIds('player-1', '动物')).toEqual(['animal_penguin', 'animal_panda']);
+    expect(await store.getQuestionProgressCounts('player-1')).toEqual({ 动物: 2 });
+    await store.resetQuestionProgress('player-1', '动物');
+    expect(await store.getQuestionProgressCounts('player-1')).toEqual({});
+  });
+
   it('persists AI cache, usage totals and score feedback', async () => {
     const { store } = createStore();
     await store.createGame(game());

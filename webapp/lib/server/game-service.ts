@@ -15,7 +15,7 @@ import {
   validateGuess,
 } from '../game-rules';
 import type { GameRecord, GameStore, GuessRecord } from './game-store';
-import { getQuestionById, selectDailyQuestion, selectRandomQuestion, type Question } from './questions';
+import { getActiveQuestionCount, getQuestionById, selectDailyQuestion, selectRandomQuestion, type Question } from './questions';
 import {
   fallbackRelationHint,
   SemanticScorerError,
@@ -73,6 +73,14 @@ export class GameService {
     excludeGameIds: readonly string[] = [],
     ownerId: string | null = null,
   ): Promise<CreateGameResponse> {
+    let seenQuestionIds: string[] = [];
+    if (ownerId) {
+      seenQuestionIds = await this.options.store.getSeenQuestionIds(ownerId, category);
+      if (seenQuestionIds.length >= getActiveQuestionCount(category)) {
+        await this.options.store.resetQuestionProgress(ownerId, category);
+        seenQuestionIds = [];
+      }
+    }
     const excludedGames = await Promise.all(
       excludeGameIds.slice(0, 12).map((gameId) => this.options.store.getGame(gameId)),
     );
@@ -84,11 +92,17 @@ export class GameService {
         )
         .map((game) => game.questionId),
     );
-    const question = this.questionSelector(category, excludedQuestionIds);
+    for (const questionId of seenQuestionIds) excludedQuestionIds.add(questionId);
+    let question = this.questionSelector(category, excludedQuestionIds);
+    if (seenQuestionIds.includes(question.id)) {
+      question = this.questionSelector(category, new Set(seenQuestionIds));
+    }
     if (question.category !== category) {
       throw new GameError('INTERNAL_ERROR', '所选分类暂时没有可用题目。', 500);
     }
-    return this.createGameForQuestion(question, 'random', null, ownerId, null);
+    const created = await this.createGameForQuestion(question, 'random', null, ownerId, null);
+    if (ownerId) await this.options.store.recordQuestionSeen(ownerId, category, question.id, this.now());
+    return created;
   }
 
   async createDailyGame(ownerId: string | null = null): Promise<CreateGameResponse> {
@@ -142,8 +156,12 @@ export class GameService {
       ownerId,
       challengeRootGameId,
     };
-    await this.options.store.createGame(game);
-    return { game: await this.toPublicGame(game, question), resumeToken };
+    const stored = mode === 'daily'
+      ? await this.options.store.createOrResumeDailyGame(game)
+      : (await this.options.store.createGame(game), game);
+    const storedQuestion = stored.questionId === question.id ? question : getQuestionById(stored.questionId);
+    if (!storedQuestion) throw new GameError('GAME_NOT_FOUND', '这道题已经下线。', 404);
+    return { game: await this.toPublicGame(stored, storedQuestion), resumeToken };
   }
 
   async restoreGame(gameId: string, resumeToken: string): Promise<PublicGame> {
@@ -297,7 +315,8 @@ export class GameService {
   ): Promise<{ game: GameRecord; question: Question }> {
     if (!isUuid(gameId) || !resumeToken) throw notFoundError();
     const game = await this.options.store.getGame(gameId);
-    if (!game || (await hashToken(resumeToken)) !== game.resumeTokenHash) {
+    const tokenHash = await hashToken(resumeToken);
+    if (!game || (tokenHash !== game.resumeTokenHash && !(await this.options.store.hasGameAccessToken(gameId, tokenHash)))) {
       throw notFoundError();
     }
     const question = getQuestionById(game.questionId);

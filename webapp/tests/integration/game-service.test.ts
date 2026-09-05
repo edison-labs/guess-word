@@ -4,6 +4,7 @@ import { MemoryGameStore } from '../../lib/server/game-store';
 import type { SemanticScorer } from '../../lib/server/scoring';
 import { DeterministicSemanticScorer, SemanticScorerError } from '../../lib/server/scoring';
 import { createTestHarness } from '../helpers';
+import { QUESTIONS } from '../../lib/server/questions';
 
 describe('game service integration', () => {
   it('creates an opaque active game and restores it with the token', async () => {
@@ -27,6 +28,36 @@ describe('game service integration', () => {
     const { service } = createTestHarness();
     const created = await service.createDailyGame();
     expect(created.game).toMatchObject({ mode: 'daily', dailyDate: '2026-08-30', status: 'active' });
+  });
+
+  it('resumes the same daily challenge for one player and rotates its token', async () => {
+    const { service } = createTestHarness();
+    const first = await service.createDailyGame('player-1');
+    const second = await service.createDailyGame('player-1');
+    expect(second.game.gameId).toBe(first.game.gameId);
+    expect(second.resumeToken).not.toBe(first.resumeToken);
+    expect((await service.restoreGame(first.game.gameId, first.resumeToken)).gameId).toBe(first.game.gameId);
+    expect((await service.restoreGame(second.game.gameId, second.resumeToken)).gameId).toBe(first.game.gameId);
+  });
+
+  it('uses every active question in a category before starting a new cycle', async () => {
+    const store = new MemoryGameStore();
+    const service = new GameService({
+      store,
+      scorer: new DeterministicSemanticScorer(),
+      questionSelector: (category, excluded) => QUESTIONS.find(
+        (item) => item.active && item.category === category && !excluded.has(item.id),
+      ) ?? QUESTIONS.find((item) => item.active && item.category === category)!,
+    });
+    const categoryQuestions = QUESTIONS.filter((item) => item.active && item.category === '动物');
+    const selected: string[] = [];
+    for (let index = 0; index < categoryQuestions.length; index += 1) {
+      const created = await service.createGame('动物', [], 'player-1');
+      selected.push((await store.getGame(created.game.gameId))!.questionId);
+    }
+    expect(new Set(selected).size).toBe(categoryQuestions.length);
+    const next = await service.createGame('动物', [], 'player-1');
+    expect((await store.getGame(next.game.gameId))!.questionId).toBe(categoryQuestions[0].id);
   });
 
   it('excludes recently completed game questions when creating another game', async () => {

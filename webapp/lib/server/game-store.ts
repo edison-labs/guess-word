@@ -73,6 +73,12 @@ export type AiStats = {
 
 export interface GameStore {
   createGame(game: GameRecord): Promise<void>;
+  createOrResumeDailyGame(game: GameRecord): Promise<GameRecord>;
+  hasGameAccessToken(gameId: string, tokenHash: string): Promise<boolean>;
+  getSeenQuestionIds(ownerId: string, category: string): Promise<string[]>;
+  recordQuestionSeen(ownerId: string, category: string, questionId: string, playedAt: number): Promise<void>;
+  resetQuestionProgress(ownerId: string, category: string): Promise<void>;
+  getQuestionProgressCounts(ownerId: string): Promise<Record<string, number>>;
   getGame(id: string): Promise<GameRecord | null>;
   getGuesses(gameId: string): Promise<GuessRecord[]>;
   hasGuess(gameId: string, normalizedGuess: string): Promise<boolean>;
@@ -299,8 +305,23 @@ export class D1GameStore implements GameStore, AccountStore {
         created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER,
         attempts INTEGER NOT NULL DEFAULT 0
       )`),
+      this.db.prepare(`CREATE TABLE IF NOT EXISTS daily_participations (
+        owner_id TEXT NOT NULL, daily_date TEXT NOT NULL, game_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL, PRIMARY KEY (owner_id, daily_date),
+        FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+      )`),
+      this.db.prepare(`CREATE TABLE IF NOT EXISTS question_progress (
+        owner_id TEXT NOT NULL, category TEXT NOT NULL, question_id TEXT NOT NULL,
+        played_at INTEGER NOT NULL, PRIMARY KEY (owner_id, category, question_id)
+      )`),
+      this.db.prepare(`CREATE TABLE IF NOT EXISTS game_access_tokens (
+        game_id TEXT NOT NULL, token_hash TEXT NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (game_id, token_hash), FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+      )`),
       this.db.prepare('CREATE INDEX IF NOT EXISTS idx_account_sessions_token ON account_sessions(token_hash)'),
       this.db.prepare('CREATE INDEX IF NOT EXISTS idx_verification_phone_created ON verification_codes(phone_hash, created_at DESC)'),
+      this.db.prepare('CREATE INDEX IF NOT EXISTS idx_daily_participations_game ON daily_participations(game_id)'),
+      this.db.prepare('CREATE INDEX IF NOT EXISTS idx_question_progress_owner_category ON question_progress(owner_id, category)'),
     ]);
     const columns = await this.db
       .prepare('PRAGMA table_info(guesses)')
@@ -381,6 +402,72 @@ export class D1GameStore implements GameStore, AccountStore {
         game.challengeRootGameId ?? null,
       )
       .run();
+  }
+
+  async createOrResumeDailyGame(game: GameRecord): Promise<GameRecord> {
+    await this.init();
+    if (!game.ownerId || !game.dailyDate) {
+      await this.createGame(game);
+      return game;
+    }
+    const insertGame = this.db.prepare(`INSERT INTO games (
+      id, resume_token_hash, question_id, category, status, started_at, ended_at,
+      hint_count, mode, daily_date, owner_id, challenge_root_game_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(game.id, game.resumeTokenHash, game.questionId, game.category, game.status,
+        game.startedAt, game.endedAt, game.hintCount, game.mode ?? 'daily', game.dailyDate,
+        game.ownerId, game.challengeRootGameId ?? null);
+    await this.db.batch([
+      this.db.prepare(`INSERT OR IGNORE INTO daily_participations (owner_id, daily_date, game_id, created_at)
+        SELECT ?, ?, id, started_at FROM games WHERE owner_id = ? AND daily_date = ?
+        ORDER BY started_at ASC LIMIT 1`).bind(game.ownerId, game.dailyDate, game.ownerId, game.dailyDate),
+      insertGame,
+      this.db.prepare(`INSERT OR IGNORE INTO daily_participations
+        (owner_id, daily_date, game_id, created_at) VALUES (?, ?, ?, ?)`)
+        .bind(game.ownerId, game.dailyDate, game.id, game.startedAt),
+      this.db.prepare(`DELETE FROM games WHERE id = ? AND NOT EXISTS
+        (SELECT 1 FROM daily_participations WHERE game_id = ?)`)
+        .bind(game.id, game.id),
+      this.db.prepare(`INSERT OR IGNORE INTO game_access_tokens (game_id, token_hash, created_at)
+        SELECT game_id, ?, ? FROM daily_participations WHERE owner_id = ? AND daily_date = ?`)
+        .bind(game.resumeTokenHash, game.startedAt, game.ownerId, game.dailyDate),
+    ]);
+    const row = await this.db.prepare(`SELECT g.* FROM daily_participations d JOIN games g ON g.id = d.game_id
+      WHERE d.owner_id = ? AND d.daily_date = ?`).bind(game.ownerId, game.dailyDate).first<GameRow>();
+    if (!row) throw new Error('Daily participation was not created.');
+    return mapGame(row);
+  }
+
+  async hasGameAccessToken(gameId: string, tokenHash: string): Promise<boolean> {
+    await this.init();
+    return Boolean(await this.db.prepare(`SELECT 1 found FROM game_access_tokens
+      WHERE game_id = ? AND token_hash = ?`).bind(gameId, tokenHash).first<{ found: number }>());
+  }
+
+  async getSeenQuestionIds(ownerId: string, category: string): Promise<string[]> {
+    await this.init();
+    const rows = await this.db.prepare(`SELECT question_id FROM question_progress
+      WHERE owner_id = ? AND category = ? ORDER BY played_at`).bind(ownerId, category).all<{ question_id: string }>();
+    return rows.results.map((row) => row.question_id);
+  }
+
+  async recordQuestionSeen(ownerId: string, category: string, questionId: string, playedAt: number): Promise<void> {
+    await this.init();
+    await this.db.prepare(`INSERT OR IGNORE INTO question_progress
+      (owner_id, category, question_id, played_at) VALUES (?, ?, ?, ?)`)
+      .bind(ownerId, category, questionId, playedAt).run();
+  }
+
+  async resetQuestionProgress(ownerId: string, category: string): Promise<void> {
+    await this.init();
+    await this.db.prepare('DELETE FROM question_progress WHERE owner_id = ? AND category = ?').bind(ownerId, category).run();
+  }
+
+  async getQuestionProgressCounts(ownerId: string): Promise<Record<string, number>> {
+    await this.init();
+    const rows = await this.db.prepare(`SELECT category, COUNT(*) count FROM question_progress
+      WHERE owner_id = ? GROUP BY category`).bind(ownerId).all<{ category: string; count: number }>();
+    return Object.fromEntries(rows.results.map((row) => [row.category, row.count]));
   }
 
   async getGame(id: string): Promise<GameRecord | null> {
@@ -678,7 +765,18 @@ export class D1GameStore implements GameStore, AccountStore {
 
   async mergeGameOwner(fromPlayerId: string, toUserId: string): Promise<void> {
     await this.init();
-    await this.db.prepare('UPDATE games SET owner_id = ? WHERE owner_id = ?').bind(toUserId, fromPlayerId).run();
+    await this.db.batch([
+      this.db.prepare(`INSERT INTO daily_participations (owner_id, daily_date, game_id, created_at)
+        SELECT ?, daily_date, game_id, created_at FROM daily_participations WHERE owner_id = ?
+        ON CONFLICT(owner_id, daily_date) DO UPDATE SET
+          game_id = CASE WHEN excluded.created_at < daily_participations.created_at THEN excluded.game_id ELSE daily_participations.game_id END,
+          created_at = MIN(excluded.created_at, daily_participations.created_at)`).bind(toUserId, fromPlayerId),
+      this.db.prepare('DELETE FROM daily_participations WHERE owner_id = ?').bind(fromPlayerId),
+      this.db.prepare(`INSERT OR IGNORE INTO question_progress (owner_id, category, question_id, played_at)
+        SELECT ?, category, question_id, played_at FROM question_progress WHERE owner_id = ?`).bind(toUserId, fromPlayerId),
+      this.db.prepare('DELETE FROM question_progress WHERE owner_id = ?').bind(fromPlayerId),
+      this.db.prepare('UPDATE games SET owner_id = ? WHERE owner_id = ?').bind(toUserId, fromPlayerId),
+    ]);
   }
 
   async listOwnedGameResults(ownerId: string, limit: number): Promise<OwnedGameResult[]> {
@@ -724,11 +822,70 @@ export class MemoryGameStore implements GameStore, AccountStore {
   private readonly accountSessions = new Map<string, AccountSessionRecord>();
   private readonly verificationCodes: VerificationCodeRecord[] = [];
   private readonly users = new Map<string, UserRecord>();
+  private readonly dailyParticipations = new Map<string, string>();
+  private readonly questionProgress = new Map<string, Map<string, number>>();
+  private readonly gameAccessTokens = new Map<string, Set<string>>();
 
   async createGame(game: GameRecord): Promise<void> {
     if (this.games.has(game.id)) throw new Error('Duplicate game id.');
     this.games.set(game.id, { ...game });
     this.guesses.set(game.id, []);
+  }
+
+  async createOrResumeDailyGame(game: GameRecord): Promise<GameRecord> {
+    if (!game.ownerId || !game.dailyDate) {
+      await this.createGame(game);
+      return game;
+    }
+    const key = `${game.ownerId}\u0000${game.dailyDate}`;
+    let existingId = this.dailyParticipations.get(key);
+    if (!existingId) {
+      const legacy = [...this.games.values()]
+        .filter((item) => item.ownerId === game.ownerId && item.dailyDate === game.dailyDate)
+        .sort((a, b) => a.startedAt - b.startedAt)[0];
+      existingId = legacy?.id;
+    }
+    if (existingId) {
+      const existing = this.games.get(existingId);
+      if (existing) {
+        const tokens = this.gameAccessTokens.get(existing.id) ?? new Set<string>();
+        tokens.add(game.resumeTokenHash);
+        this.gameAccessTokens.set(existing.id, tokens);
+        this.dailyParticipations.set(key, existing.id);
+        return { ...existing };
+      }
+    }
+    await this.createGame(game);
+    this.dailyParticipations.set(key, game.id);
+    return game;
+  }
+
+  async hasGameAccessToken(gameId: string, tokenHash: string): Promise<boolean> {
+    return this.gameAccessTokens.get(gameId)?.has(tokenHash) ?? false;
+  }
+
+  async getSeenQuestionIds(ownerId: string, category: string): Promise<string[]> {
+    return [...(this.questionProgress.get(`${ownerId}\u0000${category}`)?.keys() ?? [])];
+  }
+
+  async recordQuestionSeen(ownerId: string, category: string, questionId: string, playedAt: number): Promise<void> {
+    const key = `${ownerId}\u0000${category}`;
+    const progress = this.questionProgress.get(key) ?? new Map<string, number>();
+    if (!progress.has(questionId)) progress.set(questionId, playedAt);
+    this.questionProgress.set(key, progress);
+  }
+
+  async resetQuestionProgress(ownerId: string, category: string): Promise<void> {
+    this.questionProgress.delete(`${ownerId}\u0000${category}`);
+  }
+
+  async getQuestionProgressCounts(ownerId: string): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    for (const [key, progress] of this.questionProgress) {
+      const [candidateOwner, category] = key.split('\u0000');
+      if (candidateOwner === ownerId) counts[category] = progress.size;
+    }
+    return counts;
   }
 
   async getGame(id: string): Promise<GameRecord | null> {
@@ -874,6 +1031,25 @@ export class MemoryGameStore implements GameStore, AccountStore {
     if (user) this.users.set(id, { ...user, nickname, updatedAt });
   }
   async mergeGameOwner(fromPlayerId: string, toUserId: string): Promise<void> {
+    for (const [key, gameId] of [...this.dailyParticipations]) {
+      const [ownerId, date] = key.split('\u0000');
+      if (ownerId !== fromPlayerId) continue;
+      const targetKey = `${toUserId}\u0000${date}`;
+      const currentId = this.dailyParticipations.get(targetKey);
+      const current = currentId ? this.games.get(currentId) : undefined;
+      const incoming = this.games.get(gameId);
+      if (!current || (incoming && incoming.startedAt < current.startedAt)) this.dailyParticipations.set(targetKey, gameId);
+      this.dailyParticipations.delete(key);
+    }
+    for (const [key, progress] of [...this.questionProgress]) {
+      const [ownerId, category] = key.split('\u0000');
+      if (ownerId !== fromPlayerId) continue;
+      const targetKey = `${toUserId}\u0000${category}`;
+      const target = this.questionProgress.get(targetKey) ?? new Map<string, number>();
+      for (const [questionId, playedAt] of progress) if (!target.has(questionId)) target.set(questionId, playedAt);
+      this.questionProgress.set(targetKey, target);
+      this.questionProgress.delete(key);
+    }
     for (const game of this.games.values()) if (game.ownerId === fromPlayerId) game.ownerId = toUserId;
   }
   async listOwnedGameResults(ownerId: string, limit: number): Promise<OwnedGameResult[]> {

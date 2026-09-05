@@ -4,12 +4,14 @@ import type {
   AccountUser,
   LeaderboardEntry,
   LeaderboardResponse,
+  QuestionProgressResponse,
   ViewerResponse,
 } from '../contracts';
 import { GameError } from './game-service';
 import type { AccountSessionRecord, AccountStore, OwnedGameResult, UserRecord } from './account-store';
 import type { GameStore } from './game-store';
-import { getQuestionById } from './questions';
+import { GAME_CATEGORIES } from '../contracts';
+import { getActiveQuestionCount, getQuestionById } from './questions';
 import { SmsProviderError, type SmsProvider } from './sms';
 
 const COOKIE_NAME = 'guessword_auth';
@@ -212,10 +214,13 @@ export class AccountService {
     const context = await this.findViewer(request);
     const targetDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : chinaDate(this.now());
     const games = firstAttemptPerUser(await this.options.store.listDailyGameResults(targetDate));
+    const ranked = rankGames(games.filter((game) => game.status === 'won'), context?.user?.id ?? null);
     return {
       kind: 'daily',
       title: `${targetDate} 每日挑战榜`,
-      entries: rankGames(games.filter((game) => game.status === 'won'), context?.user?.id ?? null),
+      entries: ranked.slice(0, 100),
+      participantCount: ranked.length,
+      currentUserEntry: ranked.find((entry) => entry.isCurrentUser) ?? null,
     };
   }
 
@@ -225,10 +230,23 @@ export class AccountService {
     if (!game) throw new GameError('GAME_NOT_FOUND', '找不到这道好友挑战。', 404);
     const root = game.challengeRootGameId ?? game.id;
     const games = firstAttemptPerUser(await this.options.store.listChallengeGameResults(root));
+    const ranked = rankGames(games.filter((item) => item.status === 'won'), context?.user?.id ?? null);
     return {
       kind: 'challenge',
       title: '好友同题榜',
-      entries: rankGames(games.filter((item) => item.status === 'won'), context?.user?.id ?? null),
+      entries: ranked.slice(0, 100),
+      participantCount: ranked.length,
+      currentUserEntry: ranked.find((entry) => entry.isCurrentUser) ?? null,
+    };
+  }
+
+  async getQuestionProgress(playerId: string): Promise<QuestionProgressResponse> {
+    const counts = await this.options.store.getQuestionProgressCounts(playerId);
+    return {
+      categories: Object.fromEntries(GAME_CATEGORIES.map((category) => [category, {
+        seen: Math.min(counts[category] ?? 0, getActiveQuestionCount(category)),
+        total: getActiveQuestionCount(category),
+      }])) as QuestionProgressResponse['categories'],
     };
   }
 
@@ -318,7 +336,6 @@ function rankGames(games: OwnedGameResult[], currentUserId: string | null): Lead
         (a.endedAt - a.startedAt) - (b.endedAt - b.startedAt) ||
         a.endedAt - b.endedAt,
     )
-    .slice(0, 100)
     .map((game, index) => ({
       rank: index + 1,
       nickname: game.nickname ?? '玩家',

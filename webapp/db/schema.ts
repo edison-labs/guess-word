@@ -23,6 +23,44 @@ export const games = sqliteTable(
   ],
 );
 
+export const dailyParticipations = sqliteTable(
+  'daily_participations',
+  {
+    ownerId: text('owner_id').notNull(),
+    dailyDate: text('daily_date').notNull(),
+    gameId: text('game_id').notNull().references(() => games.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.ownerId, table.dailyDate] }),
+    index('idx_daily_participations_game').on(table.gameId),
+  ],
+);
+
+export const gameAccessTokens = sqliteTable(
+  'game_access_tokens',
+  {
+    gameId: text('game_id').notNull().references(() => games.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.gameId, table.tokenHash] })],
+);
+
+export const questionProgress = sqliteTable(
+  'question_progress',
+  {
+    ownerId: text('owner_id').notNull(),
+    category: text('category').notNull(),
+    questionId: text('question_id').notNull(),
+    playedAt: integer('played_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.ownerId, table.category, table.questionId] }),
+    index('idx_question_progress_owner_category').on(table.ownerId, table.category),
+  ],
+);
+
 export const users = sqliteTable('users', {
   id: text('id').primaryKey().notNull(),
   phoneHash: text('phone_hash').notNull().unique(),

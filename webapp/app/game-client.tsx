@@ -7,6 +7,7 @@ import {
   MAX_HINT_COUNT,
   type AccountDashboardResponse,
   type LeaderboardResponse,
+  type QuestionProgressResponse,
   type ViewerResponse,
   type GameCategory,
   ApiErrorBody,
@@ -105,6 +106,8 @@ export default function GameClient() {
   const [shareFallback, setShareFallback] = useState('');
   const [challengeSourceGameId, setChallengeSourceGameId] = useState<string | null>(null);
   const [viewer, setViewer] = useState<ViewerResponse>({ authenticated: false, user: null });
+  const [questionProgress, setQuestionProgress] = useState<QuestionProgressResponse | null>(null);
+  const [resultRanking, setResultRanking] = useState<{ gameId: string; board: LeaderboardResponse } | null>(null);
   const [showAccount, setShowAccount] = useState(false);
   const booted = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -127,6 +130,11 @@ export default function GameClient() {
   const closeAbandonDialog = useCallback(() => {
     setConfirmAbandon(false);
     requestAnimationFrame(() => abandonButtonRef.current?.focus());
+  }, []);
+
+  const refreshQuestionProgress = useCallback(async () => {
+    try { setQuestionProgress(await apiRequest<QuestionProgressResponse>('/api/progress')); }
+    catch { /* Progress is supplementary; starting a game must remain available. */ }
   }, []);
 
   const acceptGame = useCallback((nextGame: PublicGame) => {
@@ -169,6 +177,7 @@ export default function GameClient() {
       localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
       setSession(nextSession);
       acceptGame(created.game);
+      void refreshQuestionProgress();
       setInput('');
       setSortMode('score');
       setLatestSequence(null);
@@ -183,7 +192,7 @@ export default function GameClient() {
       setLoading(false);
       setBusy(null);
     }
-  }, [acceptGame, stats.recentGames]);
+  }, [acceptGame, refreshQuestionProgress, stats.recentGames]);
 
   const createDailyGame = useCallback(async () => {
     setBusy('new');
@@ -247,6 +256,7 @@ export default function GameClient() {
     }
     try {
       setViewer(await apiRequest<ViewerResponse>('/api/auth/session'));
+      void refreshQuestionProgress();
     } catch (error) {
       setMessage(getFriendlyError(error));
     }
@@ -273,7 +283,7 @@ export default function GameClient() {
     setSession(null);
     setGame(null);
     setLoading(false);
-  }, [acceptGame]);
+  }, [acceptGame, refreshQuestionProgress]);
 
   const chooseAnotherCategory = useCallback(() => {
     setInput('');
@@ -284,7 +294,8 @@ export default function GameClient() {
     setShowHome(true);
     setShareMessage('');
     setShareFallback('');
-  }, []);
+    void refreshQuestionProgress();
+  }, [refreshQuestionProgress]);
 
   useEffect(() => {
     if (booted.current) return;
@@ -298,6 +309,18 @@ export default function GameClient() {
     const frame = requestAnimationFrame(() => inputRef.current?.focus());
     return () => cancelAnimationFrame(frame);
   }, [busy, game?.gameId, game?.status, loading, showHome]);
+
+  useEffect(() => {
+    if (!viewer.authenticated || !game || game.status !== 'won') return;
+    let active = true;
+    const path = game.mode === 'daily'
+      ? `/api/leaderboards/daily?date=${encodeURIComponent(game.dailyDate ?? todayDate)}`
+      : `/api/leaderboards/challenge?gameId=${encodeURIComponent(game.gameId)}`;
+    void apiRequest<LeaderboardResponse>(path).then((board) => {
+      if (active) setResultRanking({ gameId: game.gameId, board });
+    }).catch(() => { /* The result remains valid if ranking is temporarily unavailable. */ });
+    return () => { active = false; };
+  }, [game, todayDate, viewer.authenticated]);
 
   useEffect(() => {
     if (!confirmAbandon) return;
@@ -622,6 +645,9 @@ export default function GameClient() {
                   >
                     <strong>{category}</strong>
                     <span>{CATEGORY_DESCRIPTIONS[category]}</span>
+                    {questionProgress && (
+                      <small>本轮 {questionProgress.categories[category].seen}/{questionProgress.categories[category].total}</small>
+                    )}
                   </button>
                 ))}
               </div>
@@ -674,6 +700,13 @@ export default function GameClient() {
                       <div><dt>最接近的一次</dt><dd>{game.bestGuess ? `${game.bestGuess.guess} · ${formatScore(game.bestGuess.score)}%` : '暂无'}</dd></div>
                     )}
                   </dl>
+                  {resultRanking?.gameId === game.gameId && resultRanking.board.currentUserEntry && (
+                    <p className="result-ranking">
+                      {game.mode === 'daily' ? '今日排名' : '同题排名'}
+                      <strong>#{resultRanking.board.currentUserEntry.rank}</strong>
+                      <span>/ {resultRanking.board.participantCount} 位玩家</span>
+                    </p>
+                  )}
                   <button className="primary standalone" type="button" onClick={chooseAnotherCategory}>
                     再玩一局
                   </button>
@@ -825,7 +858,7 @@ export default function GameClient() {
         <AccountCenter
           viewer={viewer}
           currentGameId={game?.gameId ?? null}
-          onViewerChange={setViewer}
+          onViewerChange={(nextViewer) => { setViewer(nextViewer); void refreshQuestionProgress(); }}
           onClose={() => setShowAccount(false)}
         />
       )}

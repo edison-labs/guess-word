@@ -45,6 +45,10 @@ compose() {
 }
 
 compose config --quiet
+if docker inspect guess-word >/dev/null 2>&1 && docker inspect -f '{{.State.Running}}' guess-word 2>/dev/null | grep -q true; then
+  echo '[+] Backing up SQLite before deployment...'
+  sh scripts/backup-sqlite.sh
+fi
 compose up -d --build
 
 attempt=0

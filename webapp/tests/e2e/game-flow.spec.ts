@@ -223,6 +223,8 @@ test('guest progress merges into SMS account and appears on the same-puzzle lead
   await page.getByLabel('你的猜测').fill('企鹅');
   await page.getByLabel('你的猜测').press('Enter');
   await expect(page.getByRole('heading', { name: '猜中了！' })).toBeVisible();
+  await expect(page.locator('.result-ranking')).toContainText('同题排名');
+  await expect(page.locator('.result-ranking')).toContainText('#1');
 
   await page.getByRole('button', { name: nickname }).click();
   await expect(page.getByText('最近战绩')).toBeVisible();
@@ -232,6 +234,10 @@ test('guest progress merges into SMS account and appears on the same-puzzle lead
   await expect(page.getByRole('heading', { name: '好友同题榜' })).toBeVisible();
   await expect(page.locator('.leaderboard-list')).toContainText(nickname);
   await expect(page.locator('.leaderboard-list')).toContainText('1 次');
+
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '返回 GuessWord 首页' }).click();
+  await expect(page.getByRole('button', { name: /^动物/ })).toContainText('本轮 1/25');
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);

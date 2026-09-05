@@ -291,6 +291,10 @@ export function getQuestionById(id: string): Question | undefined {
   return QUESTIONS.find((item) => item.id === id && item.active);
 }
 
+export function getActiveQuestionCount(category: GameCategory): number {
+  return QUESTIONS.filter((item) => item.active && item.category === category).length;
+}
+
 export function selectRandomQuestion(
   category?: GameCategory,
   randomValue: number = crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32,

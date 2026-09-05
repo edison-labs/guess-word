@@ -147,5 +147,7 @@ describe('account service', () => {
       ['玩家7000', 2],
     ]);
     expect(board.entries[1].isCurrentUser).toBe(true);
+    expect(board.participantCount).toBe(2);
+    expect(board.currentUserEntry).toMatchObject({ rank: 2, nickname: '玩家7000' });
   });
 });

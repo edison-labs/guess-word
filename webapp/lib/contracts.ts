@@ -158,4 +158,10 @@ export type LeaderboardResponse = {
   kind: 'daily' | 'challenge';
   title: string;
   entries: LeaderboardEntry[];
+  participantCount: number;
+  currentUserEntry: LeaderboardEntry | null;
+};
+
+export type QuestionProgressResponse = {
+  categories: Record<GameCategory, { seen: number; total: number }>;
 };

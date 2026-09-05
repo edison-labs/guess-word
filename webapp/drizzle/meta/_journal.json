@@ -43,6 +43,20 @@
       "when": 1788555376898,
       "tag": "0005_melted_lord_tyger",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788603451836,
+      "tag": "0006_neat_nicolaos",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788603833161,
+      "tag": "0007_ancient_phil_sheldon",
+      "breakpoints": true
     }
   ]
 }

@@ -67,6 +67,20 @@ curl --fail http://127.0.0.1/api/health
 
 题局、账号和排行榜数据都位于 `guess-word-data` volume。更新应用时再次执行 `sudo sh scripts/deploy-aliyun.sh`，启动时会增量补齐新表和字段，volume 不会被替换。不要执行 `docker compose down -v`，它会删除数据库。
 
+部署脚本会在每次更新前自动生成一份通过 SQLite 完整性校验的备份。首次部署后再安装每天 03:17 的自动备份任务：
+
+```bash
+sudo sh scripts/install-backup-cron.sh
+sudo sh scripts/backup-sqlite.sh
+ls -lh backups/
+```
+
+默认保留 30 天，可在执行或 cron 中设置 `BACKUP_RETENTION_DAYS`。需要恢复时传入备份文件；恢复脚本会先额外备份当前数据库、停止应用、校验并原子替换数据库，最后启动并检查健康状态：
+
+```bash
+sudo sh scripts/restore-sqlite.sh backups/guess-word-2026-09-05T03-17-00-000Z.sqlite
+```
+
 可用管理员 Token 查看累计 AI 请求、Token、估算费用、持久缓存和反馈数量：
 
 ```bash
