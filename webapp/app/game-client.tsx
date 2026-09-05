@@ -5,6 +5,9 @@ import {
   ANSWER_LENGTH_UNLOCK_GUESSES,
   GAME_CATEGORIES,
   MAX_HINT_COUNT,
+  type AccountDashboardResponse,
+  type LeaderboardResponse,
+  type ViewerResponse,
   type GameCategory,
   ApiErrorBody,
   CreateGameResponse,
@@ -101,6 +104,8 @@ export default function GameClient() {
   const [shareMessage, setShareMessage] = useState('');
   const [shareFallback, setShareFallback] = useState('');
   const [challengeSourceGameId, setChallengeSourceGameId] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<ViewerResponse>({ authenticated: false, user: null });
+  const [showAccount, setShowAccount] = useState(false);
   const booted = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelAbandonRef = useRef<HTMLButtonElement>(null);
@@ -239,6 +244,11 @@ export default function GameClient() {
     if (sourceGameId) {
       setChallengeSourceGameId(sourceGameId);
       setShowHome(true);
+    }
+    try {
+      setViewer(await apiRequest<ViewerResponse>('/api/auth/session'));
+    } catch (error) {
+      setMessage(getFriendlyError(error));
     }
     const stored = readSession();
     if (stored) {
@@ -511,6 +521,9 @@ export default function GameClient() {
             {game && !showHome && (
               <button className="home-link" type="button" onClick={goHome}>← 首页</button>
             )}
+            <button className="account-link" type="button" onClick={() => setShowAccount(true)}>
+              {viewer.user?.nickname ?? '登录 / 排行'}
+            </button>
             <details className="rules">
               <summary>怎么玩</summary>
               <div className="rules-card">
@@ -807,7 +820,261 @@ export default function GameClient() {
           </section>
         </div>
       )}
+
+      {showAccount && (
+        <AccountCenter
+          viewer={viewer}
+          currentGameId={game?.gameId ?? null}
+          onViewerChange={setViewer}
+          onClose={() => setShowAccount(false)}
+        />
+      )}
     </main>
+  );
+}
+
+function AccountCenter({
+  viewer,
+  currentGameId,
+  onViewerChange,
+  onClose,
+}: {
+  viewer: ViewerResponse;
+  currentGameId: string | null;
+  onViewerChange: (viewer: ViewerResponse) => void;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<'account' | 'leaderboard'>('account');
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [nickname, setNickname] = useState(viewer.user?.nickname ?? '');
+  const [cooldown, setCooldown] = useState(0);
+  const [busy, setBusy] = useState<'code' | 'login' | 'profile' | 'logout' | null>(null);
+  const [notice, setNotice] = useState('');
+  const [dashboard, setDashboard] = useState<AccountDashboardResponse | null>(null);
+  const [boardType, setBoardType] = useState<'daily' | 'challenge'>('daily');
+  const [leaderboard, setLeaderboard] = useState<LeaderboardResponse | null>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+      ) ?? [])];
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  const loadDashboard = useCallback(async () => {
+    if (!viewer.authenticated) return;
+    try { setDashboard(await apiRequest<AccountDashboardResponse>('/api/account')); }
+    catch (error) { setNotice(getFriendlyError(error)); }
+  }, [viewer.authenticated]);
+
+  useEffect(() => {
+    if (!viewer.authenticated) return;
+    let active = true;
+    void apiRequest<AccountDashboardResponse>('/api/account')
+      .then((result) => { if (active) setDashboard(result); })
+      .catch((error: unknown) => { if (active) setNotice(getFriendlyError(error)); });
+    return () => { active = false; };
+  }, [viewer.authenticated]);
+  useEffect(() => {
+    if (tab !== 'leaderboard') return;
+    if (boardType === 'challenge' && !currentGameId) return;
+    let active = true;
+    const path = boardType === 'daily'
+      ? '/api/leaderboards/daily'
+      : `/api/leaderboards/challenge?gameId=${encodeURIComponent(currentGameId!)}`;
+    void apiRequest<LeaderboardResponse>(path)
+      .then((result) => {
+        if (!active) return;
+        setLeaderboard(result);
+        setNotice('');
+      })
+      .catch((error: unknown) => { if (active) setNotice(getFriendlyError(error)); });
+    return () => { active = false; };
+  }, [boardType, currentGameId, tab]);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = window.setInterval(() => setCooldown((current) => Math.max(0, current - 1)), 1_000);
+    return () => window.clearInterval(timer);
+  }, [cooldown]);
+
+  async function requestCode() {
+    if (busy || cooldown > 0) return;
+    setBusy('code');
+    setNotice('');
+    try {
+      const result = await apiRequest<{ cooldownSeconds: number }>('/api/auth/sms/request', {
+        method: 'POST', body: JSON.stringify({ phone }),
+      });
+      setCooldown(result.cooldownSeconds);
+      setNotice('验证码已发送，5 分钟内有效。');
+    } catch (error) { setNotice(getFriendlyError(error)); }
+    finally { setBusy(null); }
+  }
+
+  async function login(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy('login');
+    setNotice('');
+    try {
+      const result = await apiRequest<ViewerResponse>('/api/auth/sms/verify', {
+        method: 'POST', body: JSON.stringify({ phone, code }),
+      });
+      onViewerChange(result);
+      setNickname(result.user?.nickname ?? '');
+      setNotice('登录成功，当前游客战绩已合并。');
+      setCode('');
+    } catch (error) { setNotice(getFriendlyError(error)); }
+    finally { setBusy(null); }
+  }
+
+  async function saveNickname(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy('profile');
+    setNotice('');
+    try {
+      const result = await apiRequest<ViewerResponse>('/api/account', {
+        method: 'PATCH', body: JSON.stringify({ nickname }),
+      });
+      onViewerChange(result);
+      setNotice('昵称已保存。');
+      await loadDashboard();
+    } catch (error) { setNotice(getFriendlyError(error)); }
+    finally { setBusy(null); }
+  }
+
+  async function logout() {
+    if (busy) return;
+    setBusy('logout');
+    setNotice('');
+    try {
+      const result = await apiRequest<ViewerResponse>('/api/auth/logout', { method: 'POST', body: '{}' });
+      onViewerChange(result);
+      setDashboard(null);
+      setPhone('');
+      setCode('');
+      setNotice('已退出登录，仍可继续以游客身份游玩。');
+    } catch (error) { setNotice(getFriendlyError(error)); }
+    finally { setBusy(null); }
+  }
+
+  return (
+    <div className="dialog-backdrop account-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section ref={dialogRef} className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title">
+        <div className="account-dialog-head">
+          <div>
+            <p className="section-kicker">GuessWord 账号</p>
+            <h2 id="account-title">{viewer.authenticated ? viewer.user?.nickname : '登录后保存全部战绩'}</h2>
+          </div>
+          <button ref={closeButtonRef} className="dialog-close" type="button" aria-label="关闭账号中心" onClick={onClose}>×</button>
+        </div>
+        <div className="account-tabs" role="tablist" aria-label="账号中心">
+          <button type="button" role="tab" aria-selected={tab === 'account'} onClick={() => setTab('account')}>
+            {viewer.authenticated ? '我的' : '登录'}
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'leaderboard'} onClick={() => setTab('leaderboard')}>排行榜</button>
+        </div>
+
+        {tab === 'account' && !viewer.authenticated && (
+          <form className="login-form" onSubmit={login}>
+            <p>无需注册密码，使用中国大陆手机号验证码登录；登录前的游客战绩会自动合并。</p>
+            <label htmlFor="login-phone">手机号</label>
+            <div className="code-row">
+              <input id="login-phone" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="请输入 11 位手机号" />
+              <button className="secondary" type="button" disabled={Boolean(busy) || cooldown > 0} onClick={() => void requestCode()}>
+                {cooldown > 0 ? `${cooldown}s` : busy === 'code' ? '发送中…' : '获取验证码'}
+              </button>
+            </div>
+            <label htmlFor="login-code">验证码</label>
+            <input id="login-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="6 位验证码" />
+            <button className="primary" type="submit" disabled={Boolean(busy)}>{busy === 'login' ? '登录中…' : '登录并保存战绩'}</button>
+          </form>
+        )}
+
+        {tab === 'account' && viewer.authenticated && (
+          <div className="account-content">
+            <form className="profile-form" onSubmit={saveNickname}>
+              <label htmlFor="profile-nickname">昵称</label>
+              <input id="profile-nickname" value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={12} />
+              <button className="secondary" type="submit" disabled={Boolean(busy)}>保存昵称</button>
+            </form>
+            <p className="masked-phone">已绑定手机号 {viewer.user?.maskedPhone}</p>
+            {dashboard ? (
+              <>
+                <dl className="account-stats">
+                  <div><dt>完成</dt><dd>{dashboard.stats.completedGames} 局</dd></div>
+                  <div><dt>猜中</dt><dd>{dashboard.stats.wonGames} 局</dd></div>
+                  <div><dt>最佳</dt><dd>{dashboard.stats.bestGuessCount ?? '—'} 次</dd></div>
+                  <div><dt>连续挑战</dt><dd>{dashboard.stats.dailyStreak} 天</dd></div>
+                </dl>
+                <h3>最近战绩</h3>
+                {dashboard.recentGames.length === 0 ? <p className="panel-empty">还没有已完成的游戏。</p> : (
+                  <ol className="account-history">
+                    {dashboard.recentGames.map((item) => (
+                      <li key={item.gameId}>
+                        <span>{item.mode === 'daily' ? '每日挑战' : item.category}</span>
+                        <strong>{item.answer}</strong>
+                        <small>{item.status === 'won' ? `${item.guessCount} 次猜中` : '已揭晓'} · 提示 {item.hintCount}</small>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </>
+            ) : <p className="panel-empty">正在读取战绩…</p>}
+            <button className="text-action" type="button" disabled={Boolean(busy)} onClick={() => void logout()}>退出登录</button>
+          </div>
+        )}
+
+        {tab === 'leaderboard' && (
+          <div className="leaderboard-panel">
+            <div className="board-switch">
+              <button type="button" aria-pressed={boardType === 'daily'} onClick={() => { setLeaderboard(null); setNotice(''); setBoardType('daily'); }}>每日挑战</button>
+              <button type="button" disabled={!currentGameId} aria-pressed={boardType === 'challenge'} onClick={() => { setLeaderboard(null); setNotice(''); setBoardType('challenge'); }}>好友同题</button>
+            </div>
+            {leaderboard && <h3>{leaderboard.title}</h3>}
+            {leaderboard?.entries.length ? (
+              <ol className="leaderboard-list">
+                {leaderboard.entries.map((entry) => (
+                  <li key={`${entry.rank}-${entry.nickname}-${entry.completedAt}`} className={entry.isCurrentUser ? 'is-me' : ''}>
+                    <strong>#{entry.rank}</strong><span>{entry.nickname}</span>
+                    <small>{entry.guessCount} 次 · 提示 {entry.hintCount} · {formatDuration(entry.durationSeconds)}</small>
+                  </li>
+                ))}
+              </ol>
+            ) : leaderboard ? <p className="panel-empty">还没有可上榜的猜中记录。</p> : <p className="panel-empty">正在读取榜单…</p>}
+            {!viewer.authenticated && <p className="ranking-note">游客可以查看榜单，登录后完成挑战才会显示昵称并参与排名。</p>}
+            {!currentGameId && <p className="ranking-note">完成或打开一道题后，可以查看这道题的好友同题榜。</p>}
+          </div>
+        )}
+        {notice && <p className="account-notice" role="status">{notice}</p>}
+      </section>
+    </div>
   );
 }
 

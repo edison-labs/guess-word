@@ -1,17 +1,63 @@
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
-export const games = sqliteTable('games', {
+export const games = sqliteTable(
+  'games',
+  {
+    id: text('id').primaryKey().notNull(),
+    resumeTokenHash: text('resume_token_hash').notNull(),
+    questionId: text('question_id').notNull(),
+    category: text('category').notNull(),
+    status: text('status', { enum: ['active', 'won', 'abandoned'] }).notNull(),
+    startedAt: integer('started_at').notNull(),
+    endedAt: integer('ended_at'),
+    hintCount: integer('hint_count').notNull().default(0),
+    mode: text('mode', { enum: ['random', 'daily'] }).notNull().default('random'),
+    dailyDate: text('daily_date'),
+    ownerId: text('owner_id'),
+    challengeRootGameId: text('challenge_root_game_id'),
+  },
+  (table) => [
+    index('idx_games_owner_ended').on(table.ownerId, table.endedAt),
+    index('idx_games_daily_rank').on(table.dailyDate, table.startedAt),
+    index('idx_games_challenge_rank').on(table.challengeRootGameId, table.startedAt),
+  ],
+);
+
+export const users = sqliteTable('users', {
   id: text('id').primaryKey().notNull(),
-  resumeTokenHash: text('resume_token_hash').notNull(),
-  questionId: text('question_id').notNull(),
-  category: text('category').notNull(),
-  status: text('status', { enum: ['active', 'won', 'abandoned'] }).notNull(),
-  startedAt: integer('started_at').notNull(),
-  endedAt: integer('ended_at'),
-  hintCount: integer('hint_count').notNull().default(0),
-  mode: text('mode', { enum: ['random', 'daily'] }).notNull().default('random'),
-  dailyDate: text('daily_date'),
+  phoneHash: text('phone_hash').notNull().unique(),
+  phoneLast4: text('phone_last4').notNull(),
+  nickname: text('nickname').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
 });
+
+export const accountSessions = sqliteTable(
+  'account_sessions',
+  {
+    id: text('id').primaryKey().notNull(),
+    tokenHash: text('token_hash').notNull().unique(),
+    playerId: text('player_id').notNull(),
+    userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (table) => [index('idx_account_sessions_token').on(table.tokenHash)],
+);
+
+export const verificationCodes = sqliteTable(
+  'verification_codes',
+  {
+    id: text('id').primaryKey().notNull(),
+    phoneHash: text('phone_hash').notNull(),
+    codeHash: text('code_hash').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    consumedAt: integer('consumed_at'),
+    attempts: integer('attempts').notNull().default(0),
+  },
+  (table) => [index('idx_verification_phone_created').on(table.phoneHash, table.createdAt)],
+);
 
 export const guesses = sqliteTable(
   'guesses',

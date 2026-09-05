@@ -1,3 +1,5 @@
 APP_ENV=test
 SEMANTIC_PROVIDER=deterministic
 TEST_QUESTION_ID=animal_penguin
+AUTH_SECRET=e2e-auth-secret-with-at-least-32-characters
+TEST_SMS_CODE=123456

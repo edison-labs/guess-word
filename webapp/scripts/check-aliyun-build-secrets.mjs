@@ -4,7 +4,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const projectDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
-const sentinel = 'guessword-aliyun-secret-sentinel-42c78d1e';
+const sentinels = [
+  'guessword-aliyun-secret-sentinel-42c78d1e',
+  'guessword-auth-secret-sentinel-93ec10f4',
+  'guessword-sms-secret-sentinel-816fc2bd',
+];
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 const build = spawnSync(npmCommand, ['run', 'build:aliyun'], {
@@ -14,8 +18,13 @@ const build = spawnSync(npmCommand, ['run', 'build:aliyun'], {
     RUNTIME_PLATFORM: 'aliyun',
     APP_ENV: 'production',
     SEMANTIC_PROVIDER: 'deepseek-judge',
-    DEEPSEEK_API_KEY: sentinel,
+    DEEPSEEK_API_KEY: sentinels[0],
     DEEPSEEK_MODEL: 'deepseek-v4-flash',
+    AUTH_SECRET: sentinels[1],
+    ALIBABA_CLOUD_ACCESS_KEY_ID: 'sentinel-access-key-id',
+    ALIBABA_CLOUD_ACCESS_KEY_SECRET: sentinels[2],
+    ALIYUN_SMS_SIGN_NAME: 'sentinel-sign-name',
+    ALIYUN_SMS_TEMPLATE_CODE: 'SMS_SENTINEL',
     DATABASE_PATH: '/data/guess-word.sqlite',
     TEST_QUESTION_ID: '',
   },
@@ -39,7 +48,10 @@ function visit(path) {
     for (const entry of readdirSync(path)) visit(join(path, entry));
     return;
   }
-  if (readFileSync(path).includes(Buffer.from(sentinel))) leakedFiles.push(path);
+  const content = readFileSync(path);
+  for (const sentinel of sentinels) {
+    if (content.includes(Buffer.from(sentinel))) leakedFiles.push(`${sentinel} in ${path}`);
+  }
 }
 
 for (const root of roots) visit(root);

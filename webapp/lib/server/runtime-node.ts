@@ -1,24 +1,35 @@
 import { isAbsolute, resolve } from 'node:path';
+import { AccountService } from './account-service';
+import { createAliyunSmsProvider } from './aliyun-sms';
 import { GameService } from './game-service';
 import { NodeSqliteGameStore } from './node-sqlite-game-store';
 import { selectRandomQuestion } from './questions';
 import { createSemanticScorer, type ScorerEnvironment } from './scoring';
 
-let runtimeService: Promise<GameService> | null = null;
+type RuntimeServices = { game: GameService; account: AccountService };
+let runtimeServices: Promise<RuntimeServices> | null = null;
 
 export async function getRuntimeGameService(): Promise<GameService> {
-  if (!runtimeService) {
-    runtimeService = createRuntimeGameService().catch((error: unknown) => {
-      runtimeService = null;
+  return (await getRuntimeServices()).game;
+}
+
+export async function getRuntimeAccountService(): Promise<AccountService> {
+  return (await getRuntimeServices()).account;
+}
+
+export async function getRuntimeServices(): Promise<RuntimeServices> {
+  if (!runtimeServices) {
+    runtimeServices = createRuntimeServices().catch((error: unknown) => {
+      runtimeServices = null;
       throw error;
     });
   }
-  return runtimeService;
+  return runtimeServices;
 }
 
 export function getRuntimeAdminToken(): string | undefined { return process.env.ADMIN_API_TOKEN; }
 
-async function createRuntimeGameService(): Promise<GameService> {
+async function createRuntimeServices(): Promise<RuntimeServices> {
   if (process.env.RUNTIME_PLATFORM !== 'aliyun') {
     throw new Error('CONFIGURATION_ERROR: Alibaba Cloud runtime is not enabled.');
   }
@@ -38,13 +49,19 @@ async function createRuntimeGameService(): Promise<GameService> {
     throw new Error('CONFIGURATION_ERROR: TEST_QUESTION_ID is forbidden in production.');
   }
 
-  return new GameService({
+  const game = new GameService({
     store,
     scorer,
     scoringMode: 'semantic',
     questionSelector: (category, excludedQuestionIds) =>
       selectRandomQuestion(category, undefined, excludedQuestionIds),
   });
+  const account = new AccountService({
+    store,
+    sms: createAliyunSmsProvider(process.env),
+    secret: process.env.AUTH_SECRET ?? '',
+  });
+  return { game, account };
 }
 
 function readScorerEnvironment(): ScorerEnvironment {

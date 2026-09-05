@@ -9,5 +9,7 @@ declare namespace Cloudflare {
     CLOUDFLARE_AI_MODEL?: string;
     DEEPSEEK_API_KEY?: string;
     DEEPSEEK_MODEL?: string;
+    AUTH_SECRET?: string;
+    TEST_SMS_CODE?: string;
   }
 }

@@ -21,7 +21,13 @@ cp .env.production.example .env.production
 chmod 600 .env.production
 ```
 
-编辑 `.env.production`，把 `DEEPSEEK_API_KEY` 替换为新生成、未在聊天或仓库出现过的服务端 Key。保持以下生产值不变：
+编辑 `.env.production`，把 `DEEPSEEK_API_KEY` 替换为新生成、未在聊天或仓库出现过的服务端 Key，并生成独立的登录会话密钥：
+
+```bash
+openssl rand -hex 32
+```
+
+把输出填入 `AUTH_SECRET`。这个值以后必须保持稳定，否则旧登录会话和手机号摘要将失效。保持以下生产值不变：
 
 ```dotenv
 RUNTIME_PLATFORM=aliyun
@@ -31,6 +37,17 @@ DATABASE_PATH=/data/guess-word.sqlite
 APP_BIND_ADDRESS=0.0.0.0
 APP_HOST_PORT=80
 ```
+
+短信登录还需要在阿里云短信服务中取得审核通过的签名和验证码模板，并给独立 RAM 用户授予发送短信的最小权限，然后填写：
+
+```dotenv
+ALIBABA_CLOUD_ACCESS_KEY_ID=your-sms-only-access-key-id
+ALIBABA_CLOUD_ACCESS_KEY_SECRET=your-sms-only-access-key-secret
+ALIYUN_SMS_SIGN_NAME=审核通过的短信签名
+ALIYUN_SMS_TEMPLATE_CODE=SMS_123456789
+```
+
+四项全部留空时，游客仍可正常玩，点击登录会提示短信尚未配置；只填一部分时部署脚本会拒绝启动，避免半配置状态。阿里云官方 TypeScript SDK 接入说明见：[发送短信示例](https://help.aliyun.com/zh/sms/developer-reference/using-typescript-openapi-example) 和 [短信服务 SDK](https://help.aliyun.com/zh/sms/developer-reference/sdk-product-overview/)。
 
 然后执行：
 
@@ -48,7 +65,7 @@ sudo docker compose --env-file .env.production -f docker-compose.aliyun.yml logs
 curl --fail http://127.0.0.1/api/health
 ```
 
-题局数据位于 `guess-word-data` volume。更新应用时再次执行 `sudo sh scripts/deploy-aliyun.sh`，volume 不会被替换。不要执行 `docker compose down -v`，它会删除题局数据库。
+题局、账号和排行榜数据都位于 `guess-word-data` volume。更新应用时再次执行 `sudo sh scripts/deploy-aliyun.sh`，启动时会增量补齐新表和字段，volume 不会被替换。不要执行 `docker compose down -v`，它会删除数据库。
 
 可用管理员 Token 查看累计 AI 请求、Token、估算费用、持久缓存和反馈数量：
 

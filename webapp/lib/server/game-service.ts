@@ -71,6 +71,7 @@ export class GameService {
   async createGame(
     category: GameCategory,
     excludeGameIds: readonly string[] = [],
+    ownerId: string | null = null,
   ): Promise<CreateGameResponse> {
     const excludedGames = await Promise.all(
       excludeGameIds.slice(0, 12).map((gameId) => this.options.store.getGame(gameId)),
@@ -87,15 +88,18 @@ export class GameService {
     if (question.category !== category) {
       throw new GameError('INTERNAL_ERROR', '所选分类暂时没有可用题目。', 500);
     }
-    return this.createGameForQuestion(question, 'random', null);
+    return this.createGameForQuestion(question, 'random', null, ownerId, null);
   }
 
-  async createDailyGame(): Promise<CreateGameResponse> {
+  async createDailyGame(ownerId: string | null = null): Promise<CreateGameResponse> {
     const date = chinaDate(this.now());
-    return this.createGameForQuestion(selectDailyQuestion(date), 'daily', date);
+    return this.createGameForQuestion(selectDailyQuestion(date), 'daily', date, ownerId, null);
   }
 
-  async createChallengeGame(sourceGameId: string): Promise<CreateGameResponse> {
+  async createChallengeGame(
+    sourceGameId: string,
+    ownerId: string | null = null,
+  ): Promise<CreateGameResponse> {
     if (!isUuid(sourceGameId)) {
       throw new GameError('GAME_NOT_FOUND', '这道分享题不存在或已失效。', 404);
     }
@@ -107,10 +111,22 @@ export class GameService {
     if (!question) {
       throw new GameError('GAME_NOT_FOUND', '这道分享题不存在或已失效。', 404);
     }
-    return this.createGameForQuestion(question, 'random', null);
+    return this.createGameForQuestion(
+      question,
+      'random',
+      null,
+      ownerId,
+      sourceGame.challengeRootGameId ?? sourceGame.id,
+    );
   }
 
-  private async createGameForQuestion(question: Question, mode: 'random' | 'daily', dailyDate: string | null): Promise<CreateGameResponse> {
+  private async createGameForQuestion(
+    question: Question,
+    mode: 'random' | 'daily',
+    dailyDate: string | null,
+    ownerId: string | null,
+    challengeRootGameId: string | null,
+  ): Promise<CreateGameResponse> {
     const resumeToken = this.tokenGenerator();
     const game: GameRecord = {
       id: this.idGenerator(),
@@ -123,6 +139,8 @@ export class GameService {
       hintCount: 0,
       mode,
       dailyDate,
+      ownerId,
+      challengeRootGameId,
     };
     await this.options.store.createGame(game);
     return { game: await this.toPublicGame(game, question), resumeToken };

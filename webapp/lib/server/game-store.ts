@@ -1,4 +1,11 @@
 import type { GameMode, GameStatus, Temperature } from '../contracts';
+import type {
+  AccountSessionRecord,
+  AccountStore,
+  OwnedGameResult,
+  UserRecord,
+  VerificationCodeRecord,
+} from './account-store';
 
 export type GameRecord = {
   id: string;
@@ -11,6 +18,8 @@ export type GameRecord = {
   hintCount: number;
   mode?: GameMode;
   dailyDate?: string | null;
+  ownerId?: string | null;
+  challengeRootGameId?: string | null;
 };
 
 export type GuessRecord = {
@@ -105,6 +114,8 @@ type GameRow = {
   hint_count: number;
   mode: GameMode;
   daily_date: string | null;
+  owner_id: string | null;
+  challenge_root_game_id: string | null;
 };
 
 type GuessRow = {
@@ -119,6 +130,56 @@ type GuessRow = {
   created_at: number;
 };
 
+type AccountSessionRow = {
+  id: string; token_hash: string; player_id: string; user_id: string | null;
+  created_at: number; expires_at: number;
+};
+
+type VerificationCodeRow = {
+  id: string; phone_hash: string; code_hash: string; created_at: number;
+  expires_at: number; consumed_at: number | null; attempts: number;
+};
+
+type UserRow = {
+  id: string; phone_hash: string; phone_last4: string; nickname: string;
+  created_at: number; updated_at: number;
+};
+
+type OwnedGameRow = {
+  game_id: string; owner_id: string; user_id: string | null; nickname: string | null;
+  question_id: string; category: string; status: GameStatus; mode: GameMode;
+  daily_date: string | null; challenge_root_game_id: string | null;
+  started_at: number; ended_at: number; hint_count: number; guess_count: number;
+};
+
+const ACCOUNT_GAME_SELECT = `SELECT
+  g.id game_id, g.owner_id, u.id user_id, u.nickname, g.question_id, g.category,
+  g.status, g.mode, g.daily_date, g.challenge_root_game_id, g.started_at, g.ended_at,
+  g.hint_count, (SELECT COUNT(*) FROM guesses q WHERE q.game_id = g.id) guess_count
+  FROM games g LEFT JOIN users u ON u.id = g.owner_id`;
+
+function mapAccountSession(row: AccountSessionRow): AccountSessionRecord {
+  return { id: row.id, tokenHash: row.token_hash, playerId: row.player_id, userId: row.user_id, createdAt: row.created_at, expiresAt: row.expires_at };
+}
+
+function mapVerificationCode(row: VerificationCodeRow): VerificationCodeRecord {
+  return { id: row.id, phoneHash: row.phone_hash, codeHash: row.code_hash, createdAt: row.created_at, expiresAt: row.expires_at, consumedAt: row.consumed_at, attempts: row.attempts };
+}
+
+function mapUser(row: UserRow): UserRecord {
+  return { id: row.id, phoneHash: row.phone_hash, phoneLast4: row.phone_last4, nickname: row.nickname, createdAt: row.created_at, updatedAt: row.updated_at };
+}
+
+function mapOwnedGame(row: OwnedGameRow): OwnedGameResult {
+  return {
+    gameId: row.game_id, ownerId: row.owner_id, userId: row.user_id, nickname: row.nickname,
+    questionId: row.question_id, category: row.category, status: row.status, mode: row.mode,
+    dailyDate: row.daily_date, challengeRootGameId: row.challenge_root_game_id,
+    startedAt: row.started_at, endedAt: row.ended_at, hintCount: row.hint_count,
+    guessCount: row.guess_count,
+  };
+}
+
 function mapGame(row: GameRow): GameRecord {
   return {
     id: row.id,
@@ -131,6 +192,8 @@ function mapGame(row: GameRow): GameRecord {
     hintCount: row.hint_count,
     mode: row.mode ?? 'random',
     dailyDate: row.daily_date ?? null,
+    ownerId: row.owner_id ?? null,
+    challengeRootGameId: row.challenge_root_game_id ?? null,
   };
 }
 
@@ -147,7 +210,7 @@ function mapGuess(row: GuessRow): GuessRecord {
   };
 }
 
-export class D1GameStore implements GameStore {
+export class D1GameStore implements GameStore, AccountStore {
   private initialized: Promise<void> | null = null;
 
   constructor(private readonly db: D1Database) {}
@@ -173,6 +236,8 @@ export class D1GameStore implements GameStore {
           hint_count INTEGER NOT NULL DEFAULT 0 CHECK (hint_count BETWEEN 0 AND 3)
           ,mode TEXT NOT NULL DEFAULT 'random' CHECK (mode IN ('random','daily'))
           ,daily_date TEXT
+          ,owner_id TEXT
+          ,challenge_root_game_id TEXT
         )
       `),
       this.db.prepare(`
@@ -220,6 +285,22 @@ export class D1GameStore implements GameStore {
         PRIMARY KEY (game_id, normalized_guess),
         FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
       )`),
+      this.db.prepare(`CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY NOT NULL, phone_hash TEXT NOT NULL UNIQUE, phone_last4 TEXT NOT NULL,
+        nickname TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      )`),
+      this.db.prepare(`CREATE TABLE IF NOT EXISTS account_sessions (
+        id TEXT PRIMARY KEY NOT NULL, token_hash TEXT NOT NULL UNIQUE, player_id TEXT NOT NULL,
+        user_id TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+      )`),
+      this.db.prepare(`CREATE TABLE IF NOT EXISTS verification_codes (
+        id TEXT PRIMARY KEY NOT NULL, phone_hash TEXT NOT NULL, code_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER,
+        attempts INTEGER NOT NULL DEFAULT 0
+      )`),
+      this.db.prepare('CREATE INDEX IF NOT EXISTS idx_account_sessions_token ON account_sessions(token_hash)'),
+      this.db.prepare('CREATE INDEX IF NOT EXISTS idx_verification_phone_created ON verification_codes(phone_hash, created_at DESC)'),
     ]);
     const columns = await this.db
       .prepare('PRAGMA table_info(guesses)')
@@ -231,6 +312,17 @@ export class D1GameStore implements GameStore {
     if (!gameColumns.results.some((column) => column.name === 'daily_date')) {
       await this.db.prepare('ALTER TABLE games ADD COLUMN daily_date TEXT').run();
     }
+    if (!gameColumns.results.some((column) => column.name === 'owner_id')) {
+      await this.db.prepare('ALTER TABLE games ADD COLUMN owner_id TEXT').run();
+    }
+    if (!gameColumns.results.some((column) => column.name === 'challenge_root_game_id')) {
+      await this.db.prepare('ALTER TABLE games ADD COLUMN challenge_root_game_id TEXT').run();
+    }
+    await this.db.batch([
+      this.db.prepare('CREATE INDEX IF NOT EXISTS idx_games_owner_ended ON games(owner_id, ended_at DESC)'),
+      this.db.prepare('CREATE INDEX IF NOT EXISTS idx_games_daily_rank ON games(daily_date, started_at)'),
+      this.db.prepare('CREATE INDEX IF NOT EXISTS idx_games_challenge_rank ON games(challenge_root_game_id, started_at)'),
+    ]);
     if (!columns.results.some((column) => column.name === 'score_milli_percent')) {
       await this.db
         .prepare('ALTER TABLE guesses ADD COLUMN score_milli_percent INTEGER NOT NULL DEFAULT 0')
@@ -270,8 +362,9 @@ export class D1GameStore implements GameStore {
     await this.db
       .prepare(`
         INSERT INTO games (
-          id, resume_token_hash, question_id, category, status, started_at, ended_at, hint_count, mode, daily_date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, resume_token_hash, question_id, category, status, started_at, ended_at,
+          hint_count, mode, daily_date, owner_id, challenge_root_game_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .bind(
         game.id,
@@ -284,6 +377,8 @@ export class D1GameStore implements GameStore {
         game.hintCount,
         game.mode ?? 'random',
         game.dailyDate ?? null,
+        game.ownerId ?? null,
+        game.challengeRootGameId ?? null,
       )
       .run();
   }
@@ -500,6 +595,116 @@ export class D1GameStore implements GameStore {
     await this.db.prepare(`INSERT INTO score_feedback VALUES (?, ?, ?, ?) ON CONFLICT(game_id, normalized_guess) DO UPDATE SET direction = excluded.direction, created_at = excluded.created_at`).bind(gameId, normalizedGuess, direction, createdAt).run();
   }
 
+  async createAccountSession(session: AccountSessionRecord): Promise<void> {
+    await this.init();
+    await this.db.prepare(`INSERT INTO account_sessions
+      (id, token_hash, player_id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .bind(session.id, session.tokenHash, session.playerId, session.userId, session.createdAt, session.expiresAt).run();
+  }
+
+  async getAccountSessionByTokenHash(tokenHash: string): Promise<AccountSessionRecord | null> {
+    await this.init();
+    const row = await this.db.prepare('SELECT * FROM account_sessions WHERE token_hash = ?').bind(tokenHash).first<AccountSessionRow>();
+    return row ? mapAccountSession(row) : null;
+  }
+
+  async updateAccountSession(id: string, tokenHash: string, playerId: string, userId: string | null, expiresAt: number): Promise<void> {
+    await this.init();
+    await this.db.prepare('UPDATE account_sessions SET token_hash = ?, player_id = ?, user_id = ?, expires_at = ? WHERE id = ?')
+      .bind(tokenHash, playerId, userId, expiresAt, id).run();
+  }
+
+  async deleteAccountSession(id: string): Promise<void> {
+    await this.init();
+    await this.db.prepare('DELETE FROM account_sessions WHERE id = ?').bind(id).run();
+  }
+
+  async createVerificationCode(code: VerificationCodeRecord): Promise<void> {
+    await this.init();
+    await this.db.prepare(`INSERT INTO verification_codes
+      (id, phone_hash, code_hash, created_at, expires_at, consumed_at, attempts) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .bind(code.id, code.phoneHash, code.codeHash, code.createdAt, code.expiresAt, code.consumedAt, code.attempts).run();
+  }
+
+  async getLatestVerificationCode(phoneHash: string): Promise<VerificationCodeRecord | null> {
+    await this.init();
+    const row = await this.db.prepare('SELECT * FROM verification_codes WHERE phone_hash = ? ORDER BY created_at DESC LIMIT 1')
+      .bind(phoneHash).first<VerificationCodeRow>();
+    return row ? mapVerificationCode(row) : null;
+  }
+
+  async countVerificationCodes(phoneHash: string, since: number): Promise<number> {
+    await this.init();
+    const row = await this.db.prepare('SELECT COUNT(*) count FROM verification_codes WHERE phone_hash = ? AND created_at >= ?')
+      .bind(phoneHash, since).first<{ count: number }>();
+    return row?.count ?? 0;
+  }
+
+  async incrementVerificationAttempts(id: string): Promise<void> {
+    await this.init();
+    await this.db.prepare('UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?').bind(id).run();
+  }
+
+  async consumeVerificationCode(id: string, consumedAt: number): Promise<boolean> {
+    await this.init();
+    const row = await this.db.prepare('UPDATE verification_codes SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL RETURNING id')
+      .bind(consumedAt, id).first<{ id: string }>();
+    return Boolean(row);
+  }
+
+  async getUserById(id: string): Promise<UserRecord | null> {
+    await this.init();
+    const row = await this.db.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<UserRow>();
+    return row ? mapUser(row) : null;
+  }
+
+  async getUserByPhoneHash(phoneHash: string): Promise<UserRecord | null> {
+    await this.init();
+    const row = await this.db.prepare('SELECT * FROM users WHERE phone_hash = ?').bind(phoneHash).first<UserRow>();
+    return row ? mapUser(row) : null;
+  }
+
+  async createUser(user: UserRecord): Promise<void> {
+    await this.init();
+    await this.db.prepare(`INSERT INTO users
+      (id, phone_hash, phone_last4, nickname, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .bind(user.id, user.phoneHash, user.phoneLast4, user.nickname, user.createdAt, user.updatedAt).run();
+  }
+
+  async updateUserNickname(id: string, nickname: string, updatedAt: number): Promise<void> {
+    await this.init();
+    await this.db.prepare('UPDATE users SET nickname = ?, updated_at = ? WHERE id = ?').bind(nickname, updatedAt, id).run();
+  }
+
+  async mergeGameOwner(fromPlayerId: string, toUserId: string): Promise<void> {
+    await this.init();
+    await this.db.prepare('UPDATE games SET owner_id = ? WHERE owner_id = ?').bind(toUserId, fromPlayerId).run();
+  }
+
+  async listOwnedGameResults(ownerId: string, limit: number): Promise<OwnedGameResult[]> {
+    await this.init();
+    const result = await this.db.prepare(`${ACCOUNT_GAME_SELECT}
+      WHERE g.owner_id = ? AND g.ended_at IS NOT NULL ORDER BY g.ended_at DESC LIMIT ?`)
+      .bind(ownerId, limit).all<OwnedGameRow>();
+    return result.results.map(mapOwnedGame);
+  }
+
+  async listDailyGameResults(date: string): Promise<OwnedGameResult[]> {
+    await this.init();
+    const result = await this.db.prepare(`${ACCOUNT_GAME_SELECT}
+      WHERE g.daily_date = ? AND g.ended_at IS NOT NULL AND u.id IS NOT NULL ORDER BY g.started_at ASC`)
+      .bind(date).all<OwnedGameRow>();
+    return result.results.map(mapOwnedGame);
+  }
+
+  async listChallengeGameResults(rootGameId: string): Promise<OwnedGameResult[]> {
+    await this.init();
+    const result = await this.db.prepare(`${ACCOUNT_GAME_SELECT}
+      WHERE (g.id = ? OR g.challenge_root_game_id = ?) AND g.ended_at IS NOT NULL AND u.id IS NOT NULL
+      ORDER BY g.started_at ASC`).bind(rootGameId, rootGameId).all<OwnedGameRow>();
+    return result.results.map(mapOwnedGame);
+  }
+
   async getAiStats(): Promise<AiStats> {
     await this.init();
     const usage = await this.db.prepare('SELECT COUNT(*) requests, COALESCE(SUM(prompt_tokens),0) prompt_tokens, COALESCE(SUM(cached_prompt_tokens),0) cached_prompt_tokens, COALESCE(SUM(completion_tokens),0) completion_tokens, COALESCE(SUM(estimated_cost_microusd),0) cost FROM ai_usage').first<{ requests:number; prompt_tokens:number; cached_prompt_tokens:number; completion_tokens:number; cost:number }>();
@@ -509,13 +714,16 @@ export class D1GameStore implements GameStore {
   }
 }
 
-export class MemoryGameStore implements GameStore {
+export class MemoryGameStore implements GameStore, AccountStore {
   private readonly games = new Map<string, GameRecord>();
   private readonly guesses = new Map<string, GuessRecord[]>();
   private readonly guessClaims = new Map<string, { token: string; claimedAt: number }>();
   private readonly semanticScores = new Map<string, SemanticScoreRecord>();
   private readonly aiUsage: AiUsageRecord[] = [];
   private readonly feedback = new Map<string, 'too_high' | 'too_low'>();
+  private readonly accountSessions = new Map<string, AccountSessionRecord>();
+  private readonly verificationCodes: VerificationCodeRecord[] = [];
+  private readonly users = new Map<string, UserRecord>();
 
   async createGame(game: GameRecord): Promise<void> {
     if (this.games.has(game.id)) throw new Error('Duplicate game id.');
@@ -624,6 +832,61 @@ export class MemoryGameStore implements GameStore {
   }
   async recordAiUsage(record: AiUsageRecord): Promise<void> { this.aiUsage.push({ ...record }); }
   async recordScoreFeedback(gameId: string, normalizedGuess: string, direction: 'too_high' | 'too_low'): Promise<void> { this.feedback.set(`${gameId}\u0000${normalizedGuess}`, direction); }
+  async createAccountSession(session: AccountSessionRecord): Promise<void> { this.accountSessions.set(session.id, { ...session }); }
+  async getAccountSessionByTokenHash(tokenHash: string): Promise<AccountSessionRecord | null> {
+    const session = [...this.accountSessions.values()].find((item) => item.tokenHash === tokenHash);
+    return session ? { ...session } : null;
+  }
+  async updateAccountSession(id: string, tokenHash: string, playerId: string, userId: string | null, expiresAt: number): Promise<void> {
+    const session = this.accountSessions.get(id);
+    if (session) this.accountSessions.set(id, { ...session, tokenHash, playerId, userId, expiresAt });
+  }
+  async deleteAccountSession(id: string): Promise<void> { this.accountSessions.delete(id); }
+  async createVerificationCode(code: VerificationCodeRecord): Promise<void> { this.verificationCodes.push({ ...code }); }
+  async getLatestVerificationCode(phoneHash: string): Promise<VerificationCodeRecord | null> {
+    const record = this.verificationCodes.filter((item) => item.phoneHash === phoneHash).sort((a, b) => b.createdAt - a.createdAt)[0];
+    return record ? { ...record } : null;
+  }
+  async countVerificationCodes(phoneHash: string, since: number): Promise<number> {
+    return this.verificationCodes.filter((item) => item.phoneHash === phoneHash && item.createdAt >= since).length;
+  }
+  async incrementVerificationAttempts(id: string): Promise<void> {
+    const record = this.verificationCodes.find((item) => item.id === id);
+    if (record) record.attempts += 1;
+  }
+  async consumeVerificationCode(id: string, consumedAt: number): Promise<boolean> {
+    const record = this.verificationCodes.find((item) => item.id === id);
+    if (!record || record.consumedAt !== null) return false;
+    record.consumedAt = consumedAt;
+    return true;
+  }
+  async getUserById(id: string): Promise<UserRecord | null> {
+    const user = this.users.get(id);
+    return user ? { ...user } : null;
+  }
+  async getUserByPhoneHash(phoneHash: string): Promise<UserRecord | null> {
+    const user = [...this.users.values()].find((item) => item.phoneHash === phoneHash);
+    return user ? { ...user } : null;
+  }
+  async createUser(user: UserRecord): Promise<void> { this.users.set(user.id, { ...user }); }
+  async updateUserNickname(id: string, nickname: string, updatedAt: number): Promise<void> {
+    const user = this.users.get(id);
+    if (user) this.users.set(id, { ...user, nickname, updatedAt });
+  }
+  async mergeGameOwner(fromPlayerId: string, toUserId: string): Promise<void> {
+    for (const game of this.games.values()) if (game.ownerId === fromPlayerId) game.ownerId = toUserId;
+  }
+  async listOwnedGameResults(ownerId: string, limit: number): Promise<OwnedGameResult[]> {
+    return this.memoryResults((game) => game.ownerId === ownerId).slice(0, limit);
+  }
+  async listDailyGameResults(date: string): Promise<OwnedGameResult[]> {
+    return this.memoryResults((game) => game.dailyDate === date && Boolean(game.ownerId && this.users.has(game.ownerId)));
+  }
+  async listChallengeGameResults(rootGameId: string): Promise<OwnedGameResult[]> {
+    return this.memoryResults((game) =>
+      (game.id === rootGameId || game.challengeRootGameId === rootGameId) && Boolean(game.ownerId && this.users.has(game.ownerId)),
+    );
+  }
   async getAiStats(): Promise<AiStats> {
     return {
       requests: this.aiUsage.length,
@@ -634,6 +897,31 @@ export class MemoryGameStore implements GameStore {
       cacheEntries: this.semanticScores.size,
       feedbackCount: this.feedback.size,
     };
+  }
+
+  private memoryResults(predicate: (game: GameRecord) => boolean): OwnedGameResult[] {
+    return [...this.games.values()]
+      .filter((game) => predicate(game) && game.endedAt !== null && Boolean(game.ownerId))
+      .map((game) => {
+        const user = game.ownerId ? this.users.get(game.ownerId) : undefined;
+        return {
+          gameId: game.id,
+          ownerId: game.ownerId!,
+          userId: user?.id ?? null,
+          nickname: user?.nickname ?? null,
+          questionId: game.questionId,
+          category: game.category,
+          status: game.status,
+          mode: game.mode ?? 'random',
+          dailyDate: game.dailyDate ?? null,
+          challengeRootGameId: game.challengeRootGameId ?? null,
+          startedAt: game.startedAt,
+          endedAt: game.endedAt!,
+          hintCount: game.hintCount,
+          guessCount: (this.guesses.get(game.id) ?? []).length,
+        };
+      })
+      .sort((a, b) => b.endedAt - a.endedAt);
   }
 }
 

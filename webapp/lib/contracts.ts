@@ -89,7 +89,9 @@ export type ApiErrorCode =
   | 'HINTS_EXHAUSTED'
   | 'RATE_LIMITED'
   | 'SCORER_UNAVAILABLE'
+  | 'SMS_UNAVAILABLE'
   | 'CONFIGURATION_ERROR'
+  | 'AUTH_REQUIRED'
   | 'INTERNAL_ERROR';
 
 export type ApiErrorBody = {
@@ -104,4 +106,56 @@ export type ApiErrorBody = {
 export type StoredSession = {
   gameId: string;
   resumeToken: string;
+};
+
+export type AccountUser = {
+  id: string;
+  nickname: string;
+  maskedPhone: string;
+  createdAt: string;
+};
+
+export type ViewerResponse = {
+  authenticated: boolean;
+  user: AccountUser | null;
+};
+
+export type AccountGameSummary = {
+  gameId: string;
+  category: GameCategory;
+  mode: GameMode;
+  dailyDate?: string;
+  status: Exclude<GameStatus, 'active'>;
+  answer: string;
+  guessCount: number;
+  hintCount: number;
+  durationSeconds: number;
+  endedAt: string;
+};
+
+export type AccountDashboardResponse = {
+  user: AccountUser;
+  stats: {
+    completedGames: number;
+    wonGames: number;
+    bestGuessCount: number | null;
+    dailyStreak: number;
+  };
+  recentGames: AccountGameSummary[];
+};
+
+export type LeaderboardEntry = {
+  rank: number;
+  nickname: string;
+  guessCount: number;
+  hintCount: number;
+  durationSeconds: number;
+  completedAt: string;
+  isCurrentUser: boolean;
+};
+
+export type LeaderboardResponse = {
+  kind: 'daily' | 'challenge';
+  title: string;
+  entries: LeaderboardEntry[];
 };

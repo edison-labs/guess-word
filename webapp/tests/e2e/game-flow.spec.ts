@@ -203,3 +203,36 @@ test('expanded categories hide word length and expose two progressive hints', as
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 });
+
+test('guest progress merges into SMS account and appears on the same-puzzle leaderboard', async ({ page }, testInfo) => {
+  const phone = testInfo.project.name === 'mobile-chrome' ? '13900139000' : '13800138000';
+  const nickname = testInfo.project.name === 'mobile-chrome' ? '玩家9000' : '玩家8000';
+  await page.getByRole('button', { name: /^动物/ }).click();
+  await page.getByRole('button', { name: '登录 / 排行' }).click();
+  const accountDialog = page.getByRole('dialog', { name: '登录后保存全部战绩' });
+  await expect(accountDialog).toBeVisible();
+  await expect(page.getByRole('button', { name: '关闭账号中心' })).toBeFocused();
+  await page.getByLabel('手机号').fill(phone);
+  await page.getByRole('button', { name: '获取验证码' }).click();
+  await expect(page.getByText('验证码已发送，5 分钟内有效。')).toBeVisible();
+  await page.getByLabel('验证码').fill('123456');
+  await page.getByRole('button', { name: '登录并保存战绩' }).click();
+  await expect(page.getByRole('button', { name: nickname })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await page.getByLabel('你的猜测').fill('企鹅');
+  await page.getByLabel('你的猜测').press('Enter');
+  await expect(page.getByRole('heading', { name: '猜中了！' })).toBeVisible();
+
+  await page.getByRole('button', { name: nickname }).click();
+  await expect(page.getByText('最近战绩')).toBeVisible();
+  await expect(page.locator('.account-history')).toContainText('企鹅');
+  await page.getByRole('tab', { name: '排行榜' }).click();
+  await page.getByRole('button', { name: '好友同题' }).click();
+  await expect(page.getByRole('heading', { name: '好友同题榜' })).toBeVisible();
+  await expect(page.locator('.leaderboard-list')).toContainText(nickname);
+  await expect(page.locator('.leaderboard-list')).toContainText('1 次');
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});

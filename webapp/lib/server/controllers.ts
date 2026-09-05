@@ -1,9 +1,14 @@
 import { isGameCategory, type ApiErrorBody, type GameResponse } from '../contracts';
+import type { AccountService } from './account-service';
 import { GameError, type GameService } from './game-service';
 
 const rateWindows = new Map<string, number[]>();
+const smsRateWindows = new Map<string, number[]>();
 const WINDOW_MS = 10_000;
 const MAX_GUESSES_PER_WINDOW = 15;
+const SMS_WINDOW_MS = 60 * 60 * 1_000;
+const MAX_SMS_PER_CLIENT_WINDOW = 10;
+const MAX_SMS_GLOBAL_WINDOW = 200;
 
 const SECURITY_HEADERS = {
   'Cache-Control': 'no-store, max-age=0',
@@ -17,6 +22,7 @@ const SECURITY_HEADERS = {
 export async function createGameController(
   request: Request,
   service: GameService,
+  accounts?: AccountService,
 ): Promise<Response> {
   try {
     assertSameOrigin(request);
@@ -26,18 +32,23 @@ export async function createGameController(
       throw invalidRequest('请选择有效的题目分类。');
     }
     const excludeGameIds = parseExcludeGameIds(body.excludeGameIds);
-    return json(await service.createGame(body.category, excludeGameIds), 201);
+    const viewer = accounts ? await accounts.ensureViewer(request) : null;
+    return withCookie(
+      json(await service.createGame(body.category, excludeGameIds, viewer?.session.playerId), 201),
+      viewer?.setCookie,
+    );
   } catch (error) {
     return errorResponse(error);
   }
 }
 
-export async function createDailyGameController(request: Request, service: GameService): Promise<Response> {
+export async function createDailyGameController(request: Request, service: GameService, accounts?: AccountService): Promise<Response> {
   try {
     assertSameOrigin(request);
     const body = await parseJsonObject(request);
     assertOnlyKeys(body, []);
-    return json(await service.createDailyGame(), 201);
+    const viewer = accounts ? await accounts.ensureViewer(request) : null;
+    return withCookie(json(await service.createDailyGame(viewer?.session.playerId), 201), viewer?.setCookie);
   } catch (error) {
     return errorResponse(error);
   }
@@ -46,6 +57,7 @@ export async function createDailyGameController(request: Request, service: GameS
 export async function createChallengeGameController(
   request: Request,
   service: GameService,
+  accounts?: AccountService,
 ): Promise<Response> {
   try {
     assertSameOrigin(request);
@@ -54,7 +66,11 @@ export async function createChallengeGameController(
     if (typeof body.sourceGameId !== 'string') {
       throw invalidRequest('分享题目编号无效。');
     }
-    return json(await service.createChallengeGame(body.sourceGameId), 201);
+    const viewer = accounts ? await accounts.ensureViewer(request) : null;
+    return withCookie(
+      json(await service.createChallengeGame(body.sourceGameId, viewer?.session.playerId), 201),
+      viewer?.setCookie,
+    );
   } catch (error) {
     return errorResponse(error);
   }
@@ -137,8 +153,98 @@ export async function aiStatsController(request: Request, service: GameService, 
   return json({ stats: await service.getAiStats() });
 }
 
+export async function viewerController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    const context = await accounts.ensureViewer(request);
+    return withCookie(json(accounts.toViewerResponse(context)), context.setCookie);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function requestLoginCodeController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    assertSameOrigin(request);
+    enforceSmsRateLimit(request);
+    const body = await parseJsonObject(request);
+    assertOnlyKeys(body, ['phone']);
+    const context = await accounts.ensureViewer(request);
+    return withCookie(json(await accounts.requestLoginCode(body.phone)), context.setCookie);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function verifyLoginCodeController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    assertSameOrigin(request);
+    const body = await parseJsonObject(request);
+    assertOnlyKeys(body, ['phone', 'code']);
+    const context = await accounts.verifyLoginCode(request, body.phone, body.code);
+    return withCookie(json(accounts.toViewerResponse(context)), context.setCookie);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function logoutController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    assertSameOrigin(request);
+    const body = await parseJsonObject(request);
+    assertOnlyKeys(body, []);
+    const context = await accounts.logout(request);
+    return withCookie(json(accounts.toViewerResponse(context)), context.setCookie);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function accountDashboardController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    return json(await accounts.getDashboard(request));
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function updateProfileController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    assertSameOrigin(request);
+    const body = await parseJsonObject(request);
+    assertOnlyKeys(body, ['nickname']);
+    const context = await accounts.updateNickname(request, body.nickname);
+    return json(accounts.toViewerResponse(context));
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function dailyLeaderboardController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    const date = new URL(request.url).searchParams.get('date') ?? undefined;
+    return json(await accounts.getDailyLeaderboard(request, date));
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function challengeLeaderboardController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    const gameId = new URL(request.url).searchParams.get('gameId');
+    if (!gameId) throw invalidRequest('缺少好友挑战编号。');
+    return json(await accounts.getChallengeLeaderboard(request, gameId));
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: SECURITY_HEADERS });
+}
+
+function withCookie(response: Response, cookie?: string): Response {
+  if (cookie) response.headers.append('Set-Cookie', cookie);
+  return response;
 }
 
 function errorResponse(error: unknown): Response {
@@ -268,10 +374,35 @@ function enforceRateLimit(key: string): void {
   if (rateWindows.size > 2_000) rateWindows.clear();
 }
 
+function enforceSmsRateLimit(request: Request): void {
+  const forwarded = firstForwardedValue(request.headers.get('x-forwarded-for'));
+  const clientKey = forwarded && /^[0-9a-f:.]{3,45}$/i.test(forwarded) ? `client:${forwarded}` : null;
+  const now = Date.now();
+  const global = pruneRateWindow(smsRateWindows.get('global') ?? [], now, SMS_WINDOW_MS);
+  const client = clientKey
+    ? pruneRateWindow(smsRateWindows.get(clientKey) ?? [], now, SMS_WINDOW_MS)
+    : [];
+  if (global.length >= MAX_SMS_GLOBAL_WINDOW || (clientKey && client.length >= MAX_SMS_PER_CLIENT_WINDOW)) {
+    throw new GameError('RATE_LIMITED', '验证码请求过于频繁，请稍后再试。', 429, true);
+  }
+  global.push(now);
+  smsRateWindows.set('global', global);
+  if (clientKey) {
+    client.push(now);
+    smsRateWindows.set(clientKey, client);
+  }
+  if (smsRateWindows.size > 2_000) smsRateWindows.clear();
+}
+
+function pruneRateWindow(values: number[], now: number, windowMs: number): number[] {
+  return values.filter((timestamp) => now - timestamp < windowMs);
+}
+
 function invalidRequest(message: string): GameError {
   return new GameError('INVALID_REQUEST', message, 400);
 }
 
 export function resetRateLimitsForTests(): void {
   rateWindows.clear();
+  smsRateWindows.clear();
 }

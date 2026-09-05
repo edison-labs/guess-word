@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GameRecord } from '../../lib/server/game-store';
 import { NodeSqliteGameStore } from '../../lib/server/node-sqlite-game-store';
@@ -99,5 +100,58 @@ describe('NodeSqliteGameStore', () => {
     await store.recordScoreFeedback('game-1', '海豹', 'too_low', 2_100);
     expect(await store.getSemanticScore('deepseek:model:v4', 'animal_penguin', '海豹')).toEqual({ scoreMilliPercent: 72_345, relationHint: '同为寒冷地区动物' });
     expect(await store.getAiStats()).toEqual({ requests: 1, promptTokens: 100, cachedPromptTokens: 80, completionTokens: 12, estimatedCostUsd: 0.000007, cacheEntries: 1, feedbackCount: 1 });
+  });
+
+  it('upgrades a legacy database without deleting existing games or guesses', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'guess-word-legacy-'));
+    createdDirectories.push(directory);
+    const databasePath = join(directory, 'game.sqlite');
+    const legacy = new DatabaseSync(databasePath);
+    legacy.exec(`
+      CREATE TABLE games (
+        id TEXT PRIMARY KEY NOT NULL, resume_token_hash TEXT NOT NULL,
+        question_id TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL,
+        started_at INTEGER NOT NULL, ended_at INTEGER, hint_count INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE guesses (
+        game_id TEXT NOT NULL, normalized_guess TEXT NOT NULL, display_guess TEXT NOT NULL,
+        score_tenths INTEGER NOT NULL, temperature TEXT NOT NULL, sequence INTEGER NOT NULL,
+        created_at INTEGER NOT NULL, PRIMARY KEY (game_id, normalized_guess), UNIQUE (game_id, sequence)
+      );
+      INSERT INTO games VALUES ('legacy-game', 'hash', 'animal_penguin', '动物', 'active', 1000, NULL, 0);
+      INSERT INTO guesses VALUES ('legacy-game', '海豹', '海豹', 727, '明显相关', 1, 2000);
+    `);
+    legacy.close();
+
+    const store = new NodeSqliteGameStore(databasePath);
+    openStores.push(store);
+    await store.init();
+    expect(await store.getGame('legacy-game')).toMatchObject({
+      mode: 'random', ownerId: null, challengeRootGameId: null,
+    });
+    expect(await store.getGuesses('legacy-game')).toEqual([
+      expect.objectContaining({ scoreMilliPercent: 72_700, relationHint: '' }),
+    ]);
+  });
+
+  it('persists users, sessions, ownership and leaderboard result fields', async () => {
+    const { store } = createStore();
+    await store.createUser({
+      id: 'user-1', phoneHash: 'phone-hash', phoneLast4: '8000', nickname: '测试玩家',
+      createdAt: 1_000, updatedAt: 1_000,
+    });
+    await store.createAccountSession({
+      id: 'session-1', tokenHash: 'token-hash', playerId: 'guest-1', userId: null,
+      createdAt: 1_000, expiresAt: 9_000,
+    });
+    await store.createGame({ ...game(), ownerId: 'guest-1' });
+    await store.abandon('game-1', 3_000);
+    await store.mergeGameOwner('guest-1', 'user-1');
+
+    expect(await store.getUserByPhoneHash('phone-hash')).toMatchObject({ nickname: '测试玩家' });
+    expect(await store.getAccountSessionByTokenHash('token-hash')).toMatchObject({ playerId: 'guest-1' });
+    expect(await store.listOwnedGameResults('user-1', 10)).toEqual([
+      expect.objectContaining({ gameId: 'game-1', nickname: '测试玩家', status: 'abandoned' }),
+    ]);
   });
 });

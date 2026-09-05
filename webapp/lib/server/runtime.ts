@@ -1,27 +1,38 @@
 import { env } from 'cloudflare:workers';
+import { AccountService } from './account-service';
 import { D1GameStore } from './game-store';
 import { GameService } from './game-service';
 import { getQuestionById, selectRandomQuestion } from './questions';
 import { createSemanticScorer } from './scoring';
+import { FixedSmsProvider, SmsProviderError } from './sms';
 
-let runtimeService: Promise<GameService> | null = null;
+type RuntimeServices = { game: GameService; account: AccountService };
+let runtimeServices: Promise<RuntimeServices> | null = null;
 
 export async function getRuntimeGameService(): Promise<GameService> {
-  if (!runtimeService) {
-    runtimeService = createRuntimeGameService().catch((error: unknown) => {
+  return (await getRuntimeServices()).game;
+}
+
+export async function getRuntimeAccountService(): Promise<AccountService> {
+  return (await getRuntimeServices()).account;
+}
+
+export async function getRuntimeServices(): Promise<RuntimeServices> {
+  if (!runtimeServices) {
+    runtimeServices = createRuntimeServices().catch((error: unknown) => {
       // A transient D1/runtime failure must not poison this isolate forever.
-      runtimeService = null;
+      runtimeServices = null;
       throw error;
     });
   }
-  return runtimeService;
+  return runtimeServices;
 }
 
 export function getRuntimeAdminToken(): string | undefined {
   return (env as unknown as { ADMIN_API_TOKEN?: string }).ADMIN_API_TOKEN;
 }
 
-async function createRuntimeGameService(): Promise<GameService> {
+async function createRuntimeServices(): Promise<RuntimeServices> {
   if (!env.DB) throw new Error('CONFIGURATION_ERROR: D1 binding DB is unavailable.');
   const store = new D1GameStore(env.DB);
   await store.init();
@@ -33,7 +44,7 @@ async function createRuntimeGameService(): Promise<GameService> {
   if (env.TEST_QUESTION_ID && env.APP_ENV !== 'production' && !fixedQuestion) {
     throw new Error('CONFIGURATION_ERROR: TEST_QUESTION_ID is unknown.');
   }
-  return new GameService({
+  const game = new GameService({
     store,
     scorer,
     scoringMode: env.SEMANTIC_PROVIDER === 'deterministic' ? 'test' : 'semantic',
@@ -42,4 +53,15 @@ async function createRuntimeGameService(): Promise<GameService> {
         ? fixedQuestion
         : selectRandomQuestion(category, undefined, excludedQuestionIds),
   });
+  const environment = env as unknown as Record<string, string | undefined>;
+  const testSms = new FixedSmsProvider();
+  const account = new AccountService({
+    store,
+    sms: environment.APP_ENV === 'production'
+      ? { async sendLoginCode() { throw new SmsProviderError('SMS is not configured.', true); } }
+      : testSms,
+    secret: environment.AUTH_SECRET ?? (environment.APP_ENV === 'production' ? '' : 'test-auth-secret-at-least-32-characters'),
+    ...(environment.APP_ENV === 'production' ? {} : { codeGenerator: () => environment.TEST_SMS_CODE ?? '123456' }),
+  });
+  return { game, account };
 }

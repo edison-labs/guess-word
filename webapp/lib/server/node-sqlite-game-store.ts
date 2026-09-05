@@ -3,6 +3,13 @@ import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { GameMode, GameStatus, Temperature } from '../contracts';
 import type {
+  AccountSessionRecord,
+  AccountStore,
+  OwnedGameResult,
+  UserRecord,
+  VerificationCodeRecord,
+} from './account-store';
+import type {
   ClaimGuessResult,
   CommitGuessResult,
   FinishMutationResult,
@@ -26,6 +33,8 @@ type GameRow = {
   hint_count: number;
   mode: GameMode;
   daily_date: string | null;
+  owner_id: string | null;
+  challenge_root_game_id: string | null;
 };
 
 type GuessRow = {
@@ -39,13 +48,38 @@ type GuessRow = {
   created_at: number;
 };
 
+type AccountSessionRow = {
+  id: string; token_hash: string; player_id: string; user_id: string | null;
+  created_at: number; expires_at: number;
+};
+type VerificationCodeRow = {
+  id: string; phone_hash: string; code_hash: string; created_at: number;
+  expires_at: number; consumed_at: number | null; attempts: number;
+};
+type UserRow = {
+  id: string; phone_hash: string; phone_last4: string; nickname: string;
+  created_at: number; updated_at: number;
+};
+type OwnedGameRow = {
+  game_id: string; owner_id: string; user_id: string | null; nickname: string | null;
+  question_id: string; category: string; status: GameStatus; mode: GameMode;
+  daily_date: string | null; challenge_root_game_id: string | null;
+  started_at: number; ended_at: number; hint_count: number; guess_count: number;
+};
+
+const ACCOUNT_GAME_SELECT = `SELECT
+  g.id game_id, g.owner_id, u.id user_id, u.nickname, g.question_id, g.category,
+  g.status, g.mode, g.daily_date, g.challenge_root_game_id, g.started_at, g.ended_at,
+  g.hint_count, (SELECT COUNT(*) FROM guesses q WHERE q.game_id = g.id) guess_count
+  FROM games g LEFT JOIN users u ON u.id = g.owner_id`;
+
 /**
  * Single-ECS persistent store for the Alibaba Cloud deployment path.
  * SQLite WAL plus BEGIN IMMEDIATE keeps claims and result commits atomic even
  * when multiple requests arrive together. The database lives on a Docker
  * volume and is not included in the application image.
  */
-export class NodeSqliteGameStore implements GameStore {
+export class NodeSqliteGameStore implements GameStore, AccountStore {
   private readonly db: DatabaseSync;
   private initialized = false;
 
@@ -74,6 +108,8 @@ export class NodeSqliteGameStore implements GameStore {
         hint_count INTEGER NOT NULL DEFAULT 0 CHECK (hint_count BETWEEN 0 AND 3)
         ,mode TEXT NOT NULL DEFAULT 'random' CHECK (mode IN ('random','daily'))
         ,daily_date TEXT
+        ,owner_id TEXT
+        ,challenge_root_game_id TEXT
       );
       CREATE TABLE IF NOT EXISTS guesses (
         game_id TEXT NOT NULL,
@@ -114,18 +150,39 @@ export class NodeSqliteGameStore implements GameStore {
         direction TEXT NOT NULL CHECK (direction IN ('too_high','too_low')), created_at INTEGER NOT NULL,
         PRIMARY KEY (game_id, normalized_guess), FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
       );
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY NOT NULL, phone_hash TEXT NOT NULL UNIQUE, phone_last4 TEXT NOT NULL,
+        nickname TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS account_sessions (
+        id TEXT PRIMARY KEY NOT NULL, token_hash TEXT NOT NULL UNIQUE, player_id TEXT NOT NULL,
+        user_id TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+      );
+      CREATE TABLE IF NOT EXISTS verification_codes (
+        id TEXT PRIMARY KEY NOT NULL, phone_hash TEXT NOT NULL, code_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER,
+        attempts INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_account_sessions_token ON account_sessions(token_hash);
+      CREATE INDEX IF NOT EXISTS idx_verification_phone_created ON verification_codes(phone_hash, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_guesses_game_sequence
         ON guesses(game_id, sequence);
       CREATE INDEX IF NOT EXISTS idx_guesses_game_score
         ON guesses(game_id, score_tenths DESC, sequence);
-      CREATE INDEX IF NOT EXISTS idx_guesses_game_score_milli
-        ON guesses(game_id, score_milli_percent DESC, sequence);
     `);
 
     const columns = this.db.prepare('PRAGMA table_info(guesses)').all() as Array<{ name: string }>;
     const gameColumns = this.db.prepare('PRAGMA table_info(games)').all() as Array<{ name: string }>;
     if (!gameColumns.some((column) => column.name === 'mode')) this.db.exec("ALTER TABLE games ADD COLUMN mode TEXT NOT NULL DEFAULT 'random'");
     if (!gameColumns.some((column) => column.name === 'daily_date')) this.db.exec('ALTER TABLE games ADD COLUMN daily_date TEXT');
+    if (!gameColumns.some((column) => column.name === 'owner_id')) this.db.exec('ALTER TABLE games ADD COLUMN owner_id TEXT');
+    if (!gameColumns.some((column) => column.name === 'challenge_root_game_id')) this.db.exec('ALTER TABLE games ADD COLUMN challenge_root_game_id TEXT');
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_games_owner_ended ON games(owner_id, ended_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_games_daily_rank ON games(daily_date, started_at);
+      CREATE INDEX IF NOT EXISTS idx_games_challenge_rank ON games(challenge_root_game_id, started_at);
+    `);
     if (!columns.some((column) => column.name === 'score_milli_percent')) {
       this.db.exec('ALTER TABLE guesses ADD COLUMN score_milli_percent INTEGER NOT NULL DEFAULT 0');
     }
@@ -140,6 +197,8 @@ export class NodeSqliteGameStore implements GameStore {
       UPDATE guesses
       SET score_milli_percent = score_tenths * 100
       WHERE score_milli_percent = 0 AND score_tenths != 0;
+      CREATE INDEX IF NOT EXISTS idx_guesses_game_score_milli
+        ON guesses(game_id, score_milli_percent DESC, sequence);
       PRAGMA optimize;
     `);
     this.initialized = true;
@@ -153,8 +212,9 @@ export class NodeSqliteGameStore implements GameStore {
     await this.init();
     this.db.prepare(`
       INSERT INTO games (
-        id, resume_token_hash, question_id, category, status, started_at, ended_at, hint_count, mode, daily_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, resume_token_hash, question_id, category, status, started_at, ended_at,
+        hint_count, mode, daily_date, owner_id, challenge_root_game_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       game.id,
       game.resumeTokenHash,
@@ -166,6 +226,8 @@ export class NodeSqliteGameStore implements GameStore {
       game.hintCount,
       game.mode ?? 'random',
       game.dailyDate ?? null,
+      game.ownerId ?? null,
+      game.challengeRootGameId ?? null,
     );
   }
 
@@ -329,6 +391,98 @@ export class NodeSqliteGameStore implements GameStore {
     await this.init();
     this.db.prepare(`INSERT INTO score_feedback VALUES (?, ?, ?, ?) ON CONFLICT(game_id, normalized_guess) DO UPDATE SET direction=excluded.direction, created_at=excluded.created_at`).run(gameId, normalizedGuess, direction, createdAt);
   }
+  async createAccountSession(session: AccountSessionRecord): Promise<void> {
+    await this.init();
+    this.db.prepare(`INSERT INTO account_sessions
+      (id, token_hash, player_id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(session.id, session.tokenHash, session.playerId, session.userId, session.createdAt, session.expiresAt);
+  }
+  async getAccountSessionByTokenHash(tokenHash: string): Promise<AccountSessionRecord | null> {
+    await this.init();
+    const row = this.db.prepare('SELECT * FROM account_sessions WHERE token_hash = ?').get(tokenHash) as AccountSessionRow | undefined;
+    return row ? mapAccountSession(row) : null;
+  }
+  async updateAccountSession(id: string, tokenHash: string, playerId: string, userId: string | null, expiresAt: number): Promise<void> {
+    await this.init();
+    this.db.prepare('UPDATE account_sessions SET token_hash = ?, player_id = ?, user_id = ?, expires_at = ? WHERE id = ?')
+      .run(tokenHash, playerId, userId, expiresAt, id);
+  }
+  async deleteAccountSession(id: string): Promise<void> {
+    await this.init();
+    this.db.prepare('DELETE FROM account_sessions WHERE id = ?').run(id);
+  }
+  async createVerificationCode(code: VerificationCodeRecord): Promise<void> {
+    await this.init();
+    this.db.prepare(`INSERT INTO verification_codes
+      (id, phone_hash, code_hash, created_at, expires_at, consumed_at, attempts) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(code.id, code.phoneHash, code.codeHash, code.createdAt, code.expiresAt, code.consumedAt, code.attempts);
+  }
+  async getLatestVerificationCode(phoneHash: string): Promise<VerificationCodeRecord | null> {
+    await this.init();
+    const row = this.db.prepare('SELECT * FROM verification_codes WHERE phone_hash = ? ORDER BY created_at DESC LIMIT 1')
+      .get(phoneHash) as VerificationCodeRow | undefined;
+    return row ? mapVerificationCode(row) : null;
+  }
+  async countVerificationCodes(phoneHash: string, since: number): Promise<number> {
+    await this.init();
+    const row = this.db.prepare('SELECT COUNT(*) count FROM verification_codes WHERE phone_hash = ? AND created_at >= ?')
+      .get(phoneHash, since) as { count: number };
+    return row.count;
+  }
+  async incrementVerificationAttempts(id: string): Promise<void> {
+    await this.init();
+    this.db.prepare('UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?').run(id);
+  }
+  async consumeVerificationCode(id: string, consumedAt: number): Promise<boolean> {
+    await this.init();
+    const result = this.db.prepare('UPDATE verification_codes SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL').run(consumedAt, id);
+    return result.changes > 0;
+  }
+  async getUserById(id: string): Promise<UserRecord | null> {
+    await this.init();
+    const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
+    return row ? mapUser(row) : null;
+  }
+  async getUserByPhoneHash(phoneHash: string): Promise<UserRecord | null> {
+    await this.init();
+    const row = this.db.prepare('SELECT * FROM users WHERE phone_hash = ?').get(phoneHash) as UserRow | undefined;
+    return row ? mapUser(row) : null;
+  }
+  async createUser(user: UserRecord): Promise<void> {
+    await this.init();
+    this.db.prepare(`INSERT INTO users
+      (id, phone_hash, phone_last4, nickname, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(user.id, user.phoneHash, user.phoneLast4, user.nickname, user.createdAt, user.updatedAt);
+  }
+  async updateUserNickname(id: string, nickname: string, updatedAt: number): Promise<void> {
+    await this.init();
+    this.db.prepare('UPDATE users SET nickname = ?, updated_at = ? WHERE id = ?').run(nickname, updatedAt, id);
+  }
+  async mergeGameOwner(fromPlayerId: string, toUserId: string): Promise<void> {
+    await this.init();
+    this.db.prepare('UPDATE games SET owner_id = ? WHERE owner_id = ?').run(toUserId, fromPlayerId);
+  }
+  async listOwnedGameResults(ownerId: string, limit: number): Promise<OwnedGameResult[]> {
+    await this.init();
+    const rows = this.db.prepare(`${ACCOUNT_GAME_SELECT}
+      WHERE g.owner_id = ? AND g.ended_at IS NOT NULL ORDER BY g.ended_at DESC LIMIT ?`)
+      .all(ownerId, limit) as OwnedGameRow[];
+    return rows.map(mapOwnedGame);
+  }
+  async listDailyGameResults(date: string): Promise<OwnedGameResult[]> {
+    await this.init();
+    const rows = this.db.prepare(`${ACCOUNT_GAME_SELECT}
+      WHERE g.daily_date = ? AND g.ended_at IS NOT NULL AND u.id IS NOT NULL ORDER BY g.started_at ASC`)
+      .all(date) as OwnedGameRow[];
+    return rows.map(mapOwnedGame);
+  }
+  async listChallengeGameResults(rootGameId: string): Promise<OwnedGameResult[]> {
+    await this.init();
+    const rows = this.db.prepare(`${ACCOUNT_GAME_SELECT}
+      WHERE (g.id = ? OR g.challenge_root_game_id = ?) AND g.ended_at IS NOT NULL AND u.id IS NOT NULL
+      ORDER BY g.started_at ASC`).all(rootGameId, rootGameId) as OwnedGameRow[];
+    return rows.map(mapOwnedGame);
+  }
   async getAiStats(): Promise<AiStats> {
     await this.init();
     const usage = this.db.prepare('SELECT COUNT(*) requests, COALESCE(SUM(prompt_tokens),0) prompt_tokens, COALESCE(SUM(cached_prompt_tokens),0) cached_prompt_tokens, COALESCE(SUM(completion_tokens),0) completion_tokens, COALESCE(SUM(estimated_cost_microusd),0) cost FROM ai_usage').get() as { requests:number; prompt_tokens:number; cached_prompt_tokens:number; completion_tokens:number; cost:number };
@@ -382,6 +536,8 @@ function mapGame(row: GameRow): GameRecord {
     hintCount: row.hint_count,
     mode: row.mode ?? 'random',
     dailyDate: row.daily_date ?? null,
+    ownerId: row.owner_id ?? null,
+    challengeRootGameId: row.challenge_root_game_id ?? null,
   };
 }
 
@@ -395,5 +551,27 @@ function mapGuess(row: GuessRow): GuessRecord {
     relationHint: row.relation_hint || '',
     sequence: row.sequence,
     createdAt: row.created_at,
+  };
+}
+
+function mapAccountSession(row: AccountSessionRow): AccountSessionRecord {
+  return { id: row.id, tokenHash: row.token_hash, playerId: row.player_id, userId: row.user_id, createdAt: row.created_at, expiresAt: row.expires_at };
+}
+
+function mapVerificationCode(row: VerificationCodeRow): VerificationCodeRecord {
+  return { id: row.id, phoneHash: row.phone_hash, codeHash: row.code_hash, createdAt: row.created_at, expiresAt: row.expires_at, consumedAt: row.consumed_at, attempts: row.attempts };
+}
+
+function mapUser(row: UserRow): UserRecord {
+  return { id: row.id, phoneHash: row.phone_hash, phoneLast4: row.phone_last4, nickname: row.nickname, createdAt: row.created_at, updatedAt: row.updated_at };
+}
+
+function mapOwnedGame(row: OwnedGameRow): OwnedGameResult {
+  return {
+    gameId: row.game_id, ownerId: row.owner_id, userId: row.user_id, nickname: row.nickname,
+    questionId: row.question_id, category: row.category, status: row.status, mode: row.mode,
+    dailyDate: row.daily_date, challengeRootGameId: row.challenge_root_game_id,
+    startedAt: row.started_at, endedAt: row.ended_at, hintCount: row.hint_count,
+    guessCount: row.guess_count,
   };
 }
