@@ -204,19 +204,21 @@ test('expanded categories hide word length and expose two progressive hints', as
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test('guest progress merges into SMS account and appears on the same-puzzle leaderboard', async ({ page }, testInfo) => {
-  const phone = testInfo.project.name === 'mobile-chrome' ? '13900139000' : '13800138000';
-  const nickname = testInfo.project.name === 'mobile-chrome' ? '玩家9000' : '玩家8000';
+test('guest progress merges into a username account and appears on the same-puzzle leaderboard', async ({ page }, testInfo) => {
+  const device = testInfo.project.name === 'mobile-chrome' ? 'mob' : 'dsk';
+  const nickname = `${device}_${Date.now().toString(36).slice(-6)}`;
   await page.getByRole('button', { name: /^动物/ }).click();
   await page.getByRole('button', { name: '登录 / 排行' }).click();
   const accountDialog = page.getByRole('dialog', { name: '登录后保存全部战绩' });
   await expect(accountDialog).toBeVisible();
-  await expect(page.getByRole('button', { name: '关闭账号中心' })).toBeFocused();
-  await page.getByLabel('手机号').fill(phone);
-  await page.getByRole('button', { name: '获取验证码' }).click();
-  await expect(page.getByText('验证码已发送，5 分钟内有效。')).toBeVisible();
-  await page.getByLabel('验证码').fill('123456');
-  await page.getByRole('button', { name: '登录并保存战绩' }).click();
+  await accountDialog.getByRole('tab', { name: '创建账号' }).click();
+  await page.getByLabel('用户名').fill(nickname);
+  await page.getByLabel('登录口令', { exact: true }).fill('e2e secure password');
+  await page.getByLabel('再次输入登录口令').fill('e2e secure password');
+  await page.getByRole('button', { name: '创建账号', exact: true }).last().click();
+  await expect(page.getByText('请立即保存恢复码', { exact: true })).toBeVisible();
+  await expect(page.locator('.recovery-card code')).toContainText(/^GW-/);
+  await page.getByRole('button', { name: '我已保存' }).click();
   await expect(page.getByRole('button', { name: nickname })).toBeVisible();
   await page.keyboard.press('Escape');
 

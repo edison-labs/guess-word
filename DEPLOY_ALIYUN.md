@@ -27,7 +27,7 @@ chmod 600 .env.production
 openssl rand -hex 32
 ```
 
-把输出填入 `AUTH_SECRET`。这个值以后必须保持稳定，否则旧登录会话和手机号摘要将失效。保持以下生产值不变：
+把输出填入 `AUTH_SECRET`。这个值以后必须保持稳定，否则旧登录会话、口令校验、恢复码和手机号摘要将失效。保持以下生产值不变：
 
 ```dotenv
 RUNTIME_PLATFORM=aliyun
@@ -47,7 +47,7 @@ ALIYUN_SMS_SIGN_NAME=审核通过的短信签名
 ALIYUN_SMS_TEMPLATE_CODE=SMS_123456789
 ```
 
-四项全部留空时，游客仍可正常玩，点击登录会提示短信尚未配置；只填一部分时部署脚本会拒绝启动，避免半配置状态。阿里云官方 TypeScript SDK 接入说明见：[发送短信示例](https://help.aliyun.com/zh/sms/developer-reference/using-typescript-openapi-example) 和 [短信服务 SDK](https://help.aliyun.com/zh/sms/developer-reference/sdk-product-overview/)。
+四项全部留空时，游客、用户名注册、口令登录和恢复码找回仍可正常使用；手机号验证码登录会提示短信尚未配置。只填一部分时部署脚本会拒绝启动，避免半配置状态。阿里云官方 TypeScript SDK 接入说明见：[发送短信示例](https://help.aliyun.com/zh/sms/developer-reference/using-typescript-openapi-example) 和 [短信服务 SDK](https://help.aliyun.com/zh/sms/developer-reference/sdk-product-overview/)。
 
 然后执行：
 

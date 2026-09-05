@@ -222,6 +222,20 @@ h2 { margin: 0; font-size: 1.08rem; letter-spacing: -.03em; }
 .login-form input, .profile-form input { min-width: 0; min-height: 44px; padding: 0 .75rem; border: 1px solid #d9cabb; border-radius: .62rem; outline: none; background: white; }
 .login-form input:focus, .profile-form input:focus { border-color: #d26a2b; box-shadow: 0 0 0 3px rgb(210 106 43 / 12%); }
 .login-form > .primary { margin-top: .28rem; }
+.credential-panel { display: grid; gap: .7rem; }
+.auth-mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem; padding: .22rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--soft); }
+.auth-mode-switch button { min-height: 38px; border: 0; border-radius: .48rem; background: transparent; color: var(--muted); font-weight: 800; }
+.auth-mode-switch button[aria-selected="true"] { background: white; color: var(--accent-dark); box-shadow: 0 2px 8px rgb(76 50 29 / 10%); }
+.auth-recover-link { justify-self: start; margin-top: 0; }
+.sms-login { padding-top: .65rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .7rem; }
+.sms-login summary { width: fit-content; cursor: pointer; color: #795847; font-weight: 750; }
+.sms-login .login-form { margin-top: .7rem; }
+.recovery-card { display: grid; gap: .5rem; margin-bottom: .8rem; padding: .8rem; border: 1px solid #e2a66f; border-radius: .72rem; background: #fff4e6; }
+.recovery-card strong { color: var(--accent-dark); font-size: .82rem; }
+.recovery-card p { margin: 0; color: #765b49; font-size: .68rem; line-height: 1.5; }
+.recovery-card code { overflow-wrap: anywhere; padding: .55rem .65rem; border: 1px dashed #d7874c; border-radius: .5rem; background: white; color: #582b14; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; font-weight: 800; letter-spacing: .04em; user-select: all; }
+.recovery-card div { display: flex; gap: .45rem; }
+.recovery-card button { min-height: 40px; padding: 0 .75rem; border-radius: .55rem; font-weight: 800; }
 .code-row { display: grid; grid-template-columns: minmax(0, 1fr) 7.5rem; gap: .45rem; }
 .profile-form { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .45rem; }
 .profile-form button { min-height: 44px; padding: 0 .7rem; border-radius: .6rem; font-weight: 800; }

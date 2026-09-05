@@ -2,6 +2,7 @@ import type { GameMode, GameStatus, Temperature } from '../contracts';
 import type {
   AccountSessionRecord,
   AccountStore,
+  AuthFailureRecord,
   OwnedGameResult,
   UserRecord,
   VerificationCodeRecord,
@@ -148,6 +149,7 @@ type VerificationCodeRow = {
 
 type UserRow = {
   id: string; phone_hash: string; phone_last4: string; nickname: string;
+  username: string | null; password_hash: string | null; recovery_code_hash: string | null;
   created_at: number; updated_at: number;
 };
 
@@ -173,7 +175,9 @@ function mapVerificationCode(row: VerificationCodeRow): VerificationCodeRecord {
 }
 
 function mapUser(row: UserRow): UserRecord {
-  return { id: row.id, phoneHash: row.phone_hash, phoneLast4: row.phone_last4, nickname: row.nickname, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, phoneHash: row.phone_hash, phoneLast4: row.phone_last4, nickname: row.nickname,
+    username: row.username, passwordHash: row.password_hash, recoveryCodeHash: row.recovery_code_hash,
+    createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 function mapOwnedGame(row: OwnedGameRow): OwnedGameResult {
@@ -293,7 +297,11 @@ export class D1GameStore implements GameStore, AccountStore {
       )`),
       this.db.prepare(`CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY NOT NULL, phone_hash TEXT NOT NULL UNIQUE, phone_last4 TEXT NOT NULL,
-        nickname TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        nickname TEXT NOT NULL, username TEXT, password_hash TEXT, recovery_code_hash TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      )`),
+      this.db.prepare(`CREATE TABLE IF NOT EXISTS auth_failures (
+        id TEXT PRIMARY KEY NOT NULL, scope_key TEXT NOT NULL, created_at INTEGER NOT NULL
       )`),
       this.db.prepare(`CREATE TABLE IF NOT EXISTS account_sessions (
         id TEXT PRIMARY KEY NOT NULL, token_hash TEXT NOT NULL UNIQUE, player_id TEXT NOT NULL,
@@ -322,11 +330,17 @@ export class D1GameStore implements GameStore, AccountStore {
       this.db.prepare('CREATE INDEX IF NOT EXISTS idx_verification_phone_created ON verification_codes(phone_hash, created_at DESC)'),
       this.db.prepare('CREATE INDEX IF NOT EXISTS idx_daily_participations_game ON daily_participations(game_id)'),
       this.db.prepare('CREATE INDEX IF NOT EXISTS idx_question_progress_owner_category ON question_progress(owner_id, category)'),
+      this.db.prepare('CREATE INDEX IF NOT EXISTS idx_auth_failures_scope_created ON auth_failures(scope_key, created_at)'),
     ]);
     const columns = await this.db
       .prepare('PRAGMA table_info(guesses)')
       .all<{ name: string }>();
     const gameColumns = await this.db.prepare('PRAGMA table_info(games)').all<{ name: string }>();
+    const userColumns = await this.db.prepare('PRAGMA table_info(users)').all<{ name: string }>();
+    if (!userColumns.results.some((column) => column.name === 'username')) await this.db.prepare('ALTER TABLE users ADD COLUMN username TEXT').run();
+    if (!userColumns.results.some((column) => column.name === 'password_hash')) await this.db.prepare('ALTER TABLE users ADD COLUMN password_hash TEXT').run();
+    if (!userColumns.results.some((column) => column.name === 'recovery_code_hash')) await this.db.prepare('ALTER TABLE users ADD COLUMN recovery_code_hash TEXT').run();
+    await this.db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)').run();
     if (!gameColumns.results.some((column) => column.name === 'mode')) {
       await this.db.prepare("ALTER TABLE games ADD COLUMN mode TEXT NOT NULL DEFAULT 'random'").run();
     }
@@ -706,6 +720,11 @@ export class D1GameStore implements GameStore, AccountStore {
     await this.db.prepare('DELETE FROM account_sessions WHERE id = ?').bind(id).run();
   }
 
+  async deleteOtherAccountSessions(userId: string, exceptSessionId: string): Promise<void> {
+    await this.init();
+    await this.db.prepare('DELETE FROM account_sessions WHERE user_id = ? AND id <> ?').bind(userId, exceptSessionId).run();
+  }
+
   async createVerificationCode(code: VerificationCodeRecord): Promise<void> {
     await this.init();
     await this.db.prepare(`INSERT INTO verification_codes
@@ -751,11 +770,44 @@ export class D1GameStore implements GameStore, AccountStore {
     return row ? mapUser(row) : null;
   }
 
+  async getUserByUsername(username: string): Promise<UserRecord | null> {
+    await this.init();
+    const row = await this.db.prepare('SELECT * FROM users WHERE username = ?').bind(username).first<UserRow>();
+    return row ? mapUser(row) : null;
+  }
+
   async createUser(user: UserRecord): Promise<void> {
     await this.init();
     await this.db.prepare(`INSERT INTO users
-      (id, phone_hash, phone_last4, nickname, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .bind(user.id, user.phoneHash, user.phoneLast4, user.nickname, user.createdAt, user.updatedAt).run();
+      (id, phone_hash, phone_last4, nickname, username, password_hash, recovery_code_hash, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(user.id, user.phoneHash, user.phoneLast4, user.nickname, user.username ?? null, user.passwordHash ?? null, user.recoveryCodeHash ?? null, user.createdAt, user.updatedAt).run();
+  }
+
+  async updateUserCredentials(id: string, passwordHash: string, recoveryCodeHash: string, updatedAt: number): Promise<void> {
+    await this.init();
+    await this.db.prepare('UPDATE users SET password_hash = ?, recovery_code_hash = ?, updated_at = ? WHERE id = ?')
+      .bind(passwordHash, recoveryCodeHash, updatedAt, id).run();
+  }
+
+  async countAuthFailures(scopeKey: string, since: number): Promise<number> {
+    await this.init();
+    const row = await this.db.prepare('SELECT COUNT(*) count FROM auth_failures WHERE scope_key = ? AND created_at >= ?')
+      .bind(scopeKey, since).first<{ count: number }>();
+    return row?.count ?? 0;
+  }
+
+  async recordAuthFailure(record: AuthFailureRecord): Promise<void> {
+    await this.init();
+    await this.db.batch([
+      this.db.prepare('DELETE FROM auth_failures WHERE created_at < ?').bind(record.createdAt - 24 * 60 * 60 * 1_000),
+      this.db.prepare('INSERT INTO auth_failures (id, scope_key, created_at) VALUES (?, ?, ?)').bind(record.id, record.scopeKey, record.createdAt),
+    ]);
+  }
+
+  async clearAuthFailures(scopeKey: string): Promise<void> {
+    await this.init();
+    await this.db.prepare('DELETE FROM auth_failures WHERE scope_key = ?').bind(scopeKey).run();
   }
 
   async updateUserNickname(id: string, nickname: string, updatedAt: number): Promise<void> {
@@ -822,6 +874,7 @@ export class MemoryGameStore implements GameStore, AccountStore {
   private readonly accountSessions = new Map<string, AccountSessionRecord>();
   private readonly verificationCodes: VerificationCodeRecord[] = [];
   private readonly users = new Map<string, UserRecord>();
+  private readonly authFailures: AuthFailureRecord[] = [];
   private readonly dailyParticipations = new Map<string, string>();
   private readonly questionProgress = new Map<string, Map<string, number>>();
   private readonly gameAccessTokens = new Map<string, Set<string>>();
@@ -999,6 +1052,9 @@ export class MemoryGameStore implements GameStore, AccountStore {
     if (session) this.accountSessions.set(id, { ...session, tokenHash, playerId, userId, expiresAt });
   }
   async deleteAccountSession(id: string): Promise<void> { this.accountSessions.delete(id); }
+  async deleteOtherAccountSessions(userId: string, exceptSessionId: string): Promise<void> {
+    for (const [id, session] of this.accountSessions) if (session.userId === userId && id !== exceptSessionId) this.accountSessions.delete(id);
+  }
   async createVerificationCode(code: VerificationCodeRecord): Promise<void> { this.verificationCodes.push({ ...code }); }
   async getLatestVerificationCode(phoneHash: string): Promise<VerificationCodeRecord | null> {
     const record = this.verificationCodes.filter((item) => item.phoneHash === phoneHash).sort((a, b) => b.createdAt - a.createdAt)[0];
@@ -1025,7 +1081,28 @@ export class MemoryGameStore implements GameStore, AccountStore {
     const user = [...this.users.values()].find((item) => item.phoneHash === phoneHash);
     return user ? { ...user } : null;
   }
+  async getUserByUsername(username: string): Promise<UserRecord | null> {
+    const user = [...this.users.values()].find((item) => item.username === username);
+    return user ? { ...user } : null;
+  }
   async createUser(user: UserRecord): Promise<void> { this.users.set(user.id, { ...user }); }
+  async updateUserCredentials(id: string, passwordHash: string, recoveryCodeHash: string, updatedAt: number): Promise<void> {
+    const user = this.users.get(id);
+    if (user) this.users.set(id, { ...user, passwordHash, recoveryCodeHash, updatedAt });
+  }
+  async countAuthFailures(scopeKey: string, since: number): Promise<number> {
+    return this.authFailures.filter((item) => item.scopeKey === scopeKey && item.createdAt >= since).length;
+  }
+  async recordAuthFailure(record: AuthFailureRecord): Promise<void> {
+    const cutoff = record.createdAt - 24 * 60 * 60 * 1_000;
+    for (let index = this.authFailures.length - 1; index >= 0; index -= 1) if (this.authFailures[index].createdAt < cutoff) this.authFailures.splice(index, 1);
+    this.authFailures.push({ ...record });
+  }
+  async clearAuthFailures(scopeKey: string): Promise<void> {
+    for (let index = this.authFailures.length - 1; index >= 0; index -= 1) {
+      if (this.authFailures[index].scopeKey === scopeKey) this.authFailures.splice(index, 1);
+    }
+  }
   async updateUserNickname(id: string, nickname: string, updatedAt: number): Promise<void> {
     const user = this.users.get(id);
     if (user) this.users.set(id, { ...user, nickname, updatedAt });

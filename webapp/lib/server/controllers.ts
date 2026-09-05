@@ -4,11 +4,15 @@ import { GameError, type GameService } from './game-service';
 
 const rateWindows = new Map<string, number[]>();
 const smsRateWindows = new Map<string, number[]>();
+const credentialRateWindows = new Map<string, number[]>();
 const WINDOW_MS = 10_000;
 const MAX_GUESSES_PER_WINDOW = 15;
 const SMS_WINDOW_MS = 60 * 60 * 1_000;
 const MAX_SMS_PER_CLIENT_WINDOW = 10;
 const MAX_SMS_GLOBAL_WINDOW = 200;
+const CREDENTIAL_WINDOW_MS = 15 * 60 * 1_000;
+const MAX_CREDENTIALS_PER_CLIENT_WINDOW = 30;
+const MAX_CREDENTIALS_GLOBAL_WINDOW = 500;
 
 const SECURITY_HEADERS = {
   'Cache-Control': 'no-store, max-age=0',
@@ -191,6 +195,45 @@ export async function verifyLoginCodeController(request: Request, accounts: Acco
     assertOnlyKeys(body, ['phone', 'code']);
     const context = await accounts.verifyLoginCode(request, body.phone, body.code);
     return withCookie(json(accounts.toViewerResponse(context)), context.setCookie);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function registerPasswordController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    assertSameOrigin(request);
+    enforceCredentialRateLimit(request);
+    const body = await parseJsonObject(request);
+    assertOnlyKeys(body, ['username', 'password']);
+    const result = await accounts.registerWithPassword(request, body.username, body.password);
+    return withCookie(json({ viewer: accounts.toViewerResponse(result.context), recoveryCode: result.recoveryCode }, 201), result.context.setCookie);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function loginPasswordController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    assertSameOrigin(request);
+    enforceCredentialRateLimit(request);
+    const body = await parseJsonObject(request);
+    assertOnlyKeys(body, ['username', 'password']);
+    const context = await accounts.loginWithPassword(request, body.username, body.password);
+    return withCookie(json({ viewer: accounts.toViewerResponse(context) }), context.setCookie);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function recoverPasswordController(request: Request, accounts: AccountService): Promise<Response> {
+  try {
+    assertSameOrigin(request);
+    enforceCredentialRateLimit(request);
+    const body = await parseJsonObject(request);
+    assertOnlyKeys(body, ['username', 'recoveryCode', 'newPassword']);
+    const result = await accounts.recoverWithCode(request, body.username, body.recoveryCode, body.newPassword);
+    return withCookie(json({ viewer: accounts.toViewerResponse(result.context), recoveryCode: result.recoveryCode }), result.context.setCookie);
   } catch (error) {
     return errorResponse(error);
   }
@@ -403,6 +446,24 @@ function enforceSmsRateLimit(request: Request): void {
   if (smsRateWindows.size > 2_000) smsRateWindows.clear();
 }
 
+function enforceCredentialRateLimit(request: Request): void {
+  const forwarded = firstForwardedValue(request.headers.get('x-forwarded-for'));
+  const clientKey = forwarded && /^[0-9a-f:.]{3,45}$/i.test(forwarded) ? `client:${forwarded}` : null;
+  const now = Date.now();
+  const global = pruneRateWindow(credentialRateWindows.get('global') ?? [], now, CREDENTIAL_WINDOW_MS);
+  const client = clientKey ? pruneRateWindow(credentialRateWindows.get(clientKey) ?? [], now, CREDENTIAL_WINDOW_MS) : [];
+  if (global.length >= MAX_CREDENTIALS_GLOBAL_WINDOW || (clientKey && client.length >= MAX_CREDENTIALS_PER_CLIENT_WINDOW)) {
+    throw new GameError('RATE_LIMITED', '登录尝试过于频繁，请稍后再试。', 429, true);
+  }
+  global.push(now);
+  credentialRateWindows.set('global', global);
+  if (clientKey) {
+    client.push(now);
+    credentialRateWindows.set(clientKey, client);
+  }
+  if (credentialRateWindows.size > 2_000) credentialRateWindows.clear();
+}
+
 function pruneRateWindow(values: number[], now: number, windowMs: number): number[] {
   return values.filter((timestamp) => now - timestamp < windowMs);
 }
@@ -414,4 +475,5 @@ function invalidRequest(message: string): GameError {
 export function resetRateLimitsForTests(): void {
   rateWindows.clear();
   smsRateWindows.clear();
+  credentialRateWindows.clear();
 }

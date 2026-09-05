@@ -29,7 +29,7 @@ export class GameError extends Error {
     message: string,
     readonly httpStatus: number,
     readonly retryable = false,
-    readonly field?: 'guess',
+    readonly field?: 'guess' | 'username' | 'password',
   ) {
     super(message);
   }

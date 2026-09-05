@@ -6,6 +6,7 @@ import {
   GAME_CATEGORIES,
   MAX_HINT_COUNT,
   type AccountDashboardResponse,
+  type CredentialAuthResponse,
   type LeaderboardResponse,
   type QuestionProgressResponse,
   type ViewerResponse,
@@ -880,9 +881,15 @@ function AccountCenter({
   const [tab, setTab] = useState<'account' | 'leaderboard'>('account');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'recover'>('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [recoveryInput, setRecoveryInput] = useState('');
+  const [newRecoveryCode, setNewRecoveryCode] = useState('');
   const [nickname, setNickname] = useState(viewer.user?.nickname ?? '');
   const [cooldown, setCooldown] = useState(0);
-  const [busy, setBusy] = useState<'code' | 'login' | 'profile' | 'logout' | null>(null);
+  const [busy, setBusy] = useState<'code' | 'sms-login' | 'password-login' | 'register' | 'recover' | 'profile' | 'logout' | null>(null);
   const [notice, setNotice] = useState('');
   const [dashboard, setDashboard] = useState<AccountDashboardResponse | null>(null);
   const [boardType, setBoardType] = useState<'daily' | 'challenge'>('daily');
@@ -890,12 +897,17 @@ function AccountCenter({
   const dialogRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
+  const requestClose = useCallback(() => {
+    if (newRecoveryCode && !window.confirm('恢复码只显示这一次。确认已经保存并关闭吗？')) return;
+    onClose();
+  }, [newRecoveryCode, onClose]);
+
   useEffect(() => {
     closeButtonRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        requestClose();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -915,7 +927,7 @@ function AccountCenter({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [requestClose]);
 
   const loadDashboard = useCallback(async () => {
     if (!viewer.authenticated) return;
@@ -967,10 +979,10 @@ function AccountCenter({
     finally { setBusy(null); }
   }
 
-  async function login(event: FormEvent<HTMLFormElement>) {
+  async function loginWithSms(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
-    setBusy('login');
+    setBusy('sms-login');
     setNotice('');
     try {
       const result = await apiRequest<ViewerResponse>('/api/auth/sms/verify', {
@@ -982,6 +994,45 @@ function AccountCenter({
       setCode('');
     } catch (error) { setNotice(getFriendlyError(error)); }
     finally { setBusy(null); }
+  }
+
+  async function submitCredential(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    setNotice('');
+    if (authMode !== 'login' && password !== confirmPassword) {
+      setNotice('两次输入的登录口令不一致。');
+      return;
+    }
+    setBusy(authMode === 'login' ? 'password-login' : authMode);
+    try {
+      const path = authMode === 'login'
+        ? '/api/auth/password/login'
+        : authMode === 'register'
+          ? '/api/auth/password/register'
+          : '/api/auth/password/recover';
+      const body = authMode === 'recover'
+        ? { username, recoveryCode: recoveryInput, newPassword: password }
+        : { username, password };
+      const result = await apiRequest<CredentialAuthResponse>(path, { method: 'POST', body: JSON.stringify(body) });
+      onViewerChange(result.viewer);
+      setNickname(result.viewer.user?.nickname ?? '');
+      setNewRecoveryCode(result.recoveryCode ?? '');
+      setPassword('');
+      setConfirmPassword('');
+      setRecoveryInput('');
+      setNotice(authMode === 'login' ? '登录成功，游客战绩已自动合并。' : authMode === 'register' ? '账号已创建，请立即保存恢复码。' : '口令已重置，请保存新的恢复码。');
+    } catch (error) { setNotice(getFriendlyError(error)); }
+    finally { setBusy(null); }
+  }
+
+  async function copyRecoveryCode() {
+    try {
+      await copyText(newRecoveryCode);
+      setNotice('恢复码已复制，请保存到安全的位置。');
+    } catch {
+      setNotice('复制失败，请手动选中恢复码保存。');
+    }
   }
 
   async function saveNickname(event: FormEvent<HTMLFormElement>) {
@@ -1010,6 +1061,10 @@ function AccountCenter({
       setDashboard(null);
       setPhone('');
       setCode('');
+      setUsername('');
+      setPassword('');
+      setConfirmPassword('');
+      setNewRecoveryCode('');
       setNotice('已退出登录，仍可继续以游客身份游玩。');
     } catch (error) { setNotice(getFriendlyError(error)); }
     finally { setBusy(null); }
@@ -1017,7 +1072,7 @@ function AccountCenter({
 
   return (
     <div className="dialog-backdrop account-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
+      if (event.target === event.currentTarget) requestClose();
     }}>
       <section ref={dialogRef} className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title">
         <div className="account-dialog-head">
@@ -1025,7 +1080,7 @@ function AccountCenter({
             <p className="section-kicker">GuessWord 账号</p>
             <h2 id="account-title">{viewer.authenticated ? viewer.user?.nickname : '登录后保存全部战绩'}</h2>
           </div>
-          <button ref={closeButtonRef} className="dialog-close" type="button" aria-label="关闭账号中心" onClick={onClose}>×</button>
+          <button ref={closeButtonRef} className="dialog-close" type="button" aria-label="关闭账号中心" onClick={requestClose}>×</button>
         </div>
         <div className="account-tabs" role="tablist" aria-label="账号中心">
           <button type="button" role="tab" aria-selected={tab === 'account'} onClick={() => setTab('account')}>
@@ -1035,29 +1090,54 @@ function AccountCenter({
         </div>
 
         {tab === 'account' && !viewer.authenticated && (
-          <form className="login-form" onSubmit={login}>
-            <p>无需注册密码，使用中国大陆手机号验证码登录；登录前的游客战绩会自动合并。</p>
-            <label htmlFor="login-phone">手机号</label>
-            <div className="code-row">
-              <input id="login-phone" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="请输入 11 位手机号" />
-              <button className="secondary" type="button" disabled={Boolean(busy) || cooldown > 0} onClick={() => void requestCode()}>
-                {cooldown > 0 ? `${cooldown}s` : busy === 'code' ? '发送中…' : '获取验证码'}
-              </button>
+          <div className="credential-panel">
+            <div className="auth-mode-switch" role="tablist" aria-label="登录方式">
+              <button type="button" role="tab" aria-selected={authMode === 'login'} onClick={() => { setAuthMode('login'); setNotice(''); }}>登录</button>
+              <button type="button" role="tab" aria-selected={authMode === 'register'} onClick={() => { setAuthMode('register'); setNotice(''); }}>创建账号</button>
             </div>
-            <label htmlFor="login-code">验证码</label>
-            <input id="login-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="6 位验证码" />
-            <button className="primary" type="submit" disabled={Boolean(busy)}>{busy === 'login' ? '登录中…' : '登录并保存战绩'}</button>
-          </form>
+            <form className="login-form" onSubmit={submitCredential}>
+              <p>{authMode === 'register' ? '创建后会生成一个恢复码，请妥善保存；游客战绩会自动合并。' : authMode === 'recover' ? '输入恢复码并设置新的登录口令。成功后旧恢复码会失效。' : '使用用户名和登录口令登录，登录前的游客战绩会自动合并。'}</p>
+              <label htmlFor="login-username">用户名</label>
+              <input id="login-username" autoCapitalize="none" autoComplete="username" maxLength={20} value={username} onChange={(event) => setUsername(event.target.value)} placeholder="3～20 个字符" />
+              {authMode === 'recover' && <><label htmlFor="login-recovery">恢复码</label><input id="login-recovery" autoCapitalize="characters" autoComplete="off" value={recoveryInput} onChange={(event) => setRecoveryInput(event.target.value)} placeholder="GW-XXXX-XXXX-XXXX-XXXX-XXXX" /></>}
+              <label htmlFor="login-password">{authMode === 'recover' ? '新登录口令' : '登录口令'}</label>
+              <input id="login-password" type="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} maxLength={64} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={authMode === 'login' ? '请输入登录口令' : '至少 8 个字符'} />
+              {authMode !== 'login' && <><label htmlFor="login-password-confirm">再次输入登录口令</label><input id="login-password-confirm" type="password" autoComplete="new-password" maxLength={64} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="请再次输入" /></>}
+              <button className="primary" type="submit" disabled={Boolean(busy)}>{busy ? '处理中…' : authMode === 'login' ? '登录并保存战绩' : authMode === 'register' ? '创建账号' : '重置口令并登录'}</button>
+              <button className="text-action auth-recover-link" type="button" onClick={() => { setAuthMode(authMode === 'recover' ? 'login' : 'recover'); setNotice(''); }}>
+                {authMode === 'recover' ? '返回登录' : '忘记登录口令？'}
+              </button>
+            </form>
+            <details className="sms-login">
+              <summary>使用手机号验证码登录</summary>
+              <form className="login-form" onSubmit={loginWithSms}>
+                <label htmlFor="login-phone">手机号</label>
+                <div className="code-row">
+                  <input id="login-phone" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="请输入 11 位手机号" />
+                  <button className="secondary" type="button" disabled={Boolean(busy) || cooldown > 0} onClick={() => void requestCode()}>{cooldown > 0 ? `${cooldown}s` : busy === 'code' ? '发送中…' : '获取验证码'}</button>
+                </div>
+                <label htmlFor="login-code">验证码</label>
+                <input id="login-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="6 位验证码" />
+                <button className="secondary" type="submit" disabled={Boolean(busy)}>{busy === 'sms-login' ? '登录中…' : '手机号登录'}</button>
+              </form>
+            </details>
+          </div>
         )}
 
         {tab === 'account' && viewer.authenticated && (
           <div className="account-content">
+            {newRecoveryCode && <section className="recovery-card" aria-labelledby="recovery-title">
+              <strong id="recovery-title">请立即保存恢复码</strong>
+              <p>忘记登录口令时，这是找回账号的唯一凭证，只显示这一次。</p>
+              <code>{newRecoveryCode}</code>
+              <div><button className="secondary" type="button" onClick={() => void copyRecoveryCode()}>复制恢复码</button><button className="primary" type="button" onClick={() => setNewRecoveryCode('')}>我已保存</button></div>
+            </section>}
             <form className="profile-form" onSubmit={saveNickname}>
               <label htmlFor="profile-nickname">昵称</label>
               <input id="profile-nickname" value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={12} />
               <button className="secondary" type="submit" disabled={Boolean(busy)}>保存昵称</button>
             </form>
-            <p className="masked-phone">已绑定手机号 {viewer.user?.maskedPhone}</p>
+            <p className="masked-phone">{viewer.user?.username ? `用户名 @${viewer.user.username}` : `已绑定手机号 ${viewer.user?.maskedPhone}`}</p>
             {dashboard ? (
               <>
                 <dl className="account-stats">

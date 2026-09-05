@@ -15,7 +15,7 @@ Vinext / Cloudflare Worker Route Handlers
   │    ├─ deterministic（仅 development/test）
   │    ├─ Cloudflare AI BGE-M3 embeddings（显式真实配置）
   │    └─ DeepSeek V4 Flash JSON judge（显式真实配置）
-  ├─ AccountService：游客会话、短信验证码、账号合并和榜单规则
+  ├─ AccountService：游客会话、用户名口令、恢复码、短信验证码、账号合并和榜单规则
   ├─ SmsProvider：开发固定验证码 / 阿里云 Dysmsapi 生产短信
   └─ D1GameStore / NodeSqliteGameStore
        ├─ games：私有 questionId、状态、提示次数、令牌摘要

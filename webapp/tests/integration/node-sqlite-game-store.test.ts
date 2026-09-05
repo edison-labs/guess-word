@@ -171,4 +171,21 @@ describe('NodeSqliteGameStore', () => {
       expect.objectContaining({ gameId: 'game-1', nickname: '测试玩家', status: 'abandoned' }),
     ]);
   });
+
+  it('persists username credentials and account-scoped auth failures', async () => {
+    const { store } = createStore();
+    await store.createUser({
+      id: 'local-user', phoneHash: 'synthetic-phone', phoneLast4: '', nickname: '本地玩家',
+      username: 'local_player', passwordHash: 'password-hash', recoveryCodeHash: 'recovery-hash',
+      createdAt: 1_000, updatedAt: 1_000,
+    });
+    expect(await store.getUserByUsername('local_player')).toMatchObject({ passwordHash: 'password-hash', phoneLast4: '' });
+    await store.updateUserCredentials('local-user', 'new-password-hash', 'new-recovery-hash', 2_000);
+    expect(await store.getUserById('local-user')).toMatchObject({ passwordHash: 'new-password-hash', recoveryCodeHash: 'new-recovery-hash', updatedAt: 2_000 });
+
+    await store.recordAuthFailure({ id: 'failure-1', scopeKey: 'scope', createdAt: 2_100 });
+    expect(await store.countAuthFailures('scope', 2_000)).toBe(1);
+    await store.clearAuthFailures('scope');
+    expect(await store.countAuthFailures('scope', 0)).toBe(0);
+  });
 });

@@ -66,9 +66,22 @@ export const users = sqliteTable('users', {
   phoneHash: text('phone_hash').notNull().unique(),
   phoneLast4: text('phone_last4').notNull(),
   nickname: text('nickname').notNull(),
+  username: text('username'),
+  passwordHash: text('password_hash'),
+  recoveryCodeHash: text('recovery_code_hash'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
-});
+}, (table) => [uniqueIndex('idx_users_username').on(table.username)]);
+
+export const authFailures = sqliteTable(
+  'auth_failures',
+  {
+    id: text('id').primaryKey().notNull(),
+    scopeKey: text('scope_key').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [index('idx_auth_failures_scope_created').on(table.scopeKey, table.createdAt)],
+);
 
 export const accountSessions = sqliteTable(
   'account_sessions',

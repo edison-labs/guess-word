@@ -57,6 +57,13 @@
       "when": 1788603833161,
       "tag": "0007_ancient_phil_sheldon",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788631869779,
+      "tag": "0008_military_klaw",
+      "breakpoints": true
     }
   ]
 }

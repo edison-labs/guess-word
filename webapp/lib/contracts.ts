@@ -99,7 +99,7 @@ export type ApiErrorBody = {
     code: ApiErrorCode;
     message: string;
     retryable: boolean;
-    field?: 'guess';
+    field?: 'guess' | 'username' | 'password';
   };
 };
 
@@ -111,13 +111,19 @@ export type StoredSession = {
 export type AccountUser = {
   id: string;
   nickname: string;
-  maskedPhone: string;
+  username?: string;
+  maskedPhone?: string;
   createdAt: string;
 };
 
 export type ViewerResponse = {
   authenticated: boolean;
   user: AccountUser | null;
+};
+
+export type CredentialAuthResponse = {
+  viewer: ViewerResponse;
+  recoveryCode?: string;
 };
 
 export type AccountGameSummary = {

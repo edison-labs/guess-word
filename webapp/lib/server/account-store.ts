@@ -5,8 +5,17 @@ export type UserRecord = {
   phoneHash: string;
   phoneLast4: string;
   nickname: string;
+  username?: string | null;
+  passwordHash?: string | null;
+  recoveryCodeHash?: string | null;
   createdAt: number;
   updatedAt: number;
+};
+
+export type AuthFailureRecord = {
+  id: string;
+  scopeKey: string;
+  createdAt: number;
 };
 
 export type AccountSessionRecord = {
@@ -56,6 +65,7 @@ export interface AccountStore {
     expiresAt: number,
   ): Promise<void>;
   deleteAccountSession(id: string): Promise<void>;
+  deleteOtherAccountSessions(userId: string, exceptSessionId: string): Promise<void>;
   createVerificationCode(code: VerificationCodeRecord): Promise<void>;
   getLatestVerificationCode(phoneHash: string): Promise<VerificationCodeRecord | null>;
   countVerificationCodes(phoneHash: string, since: number): Promise<number>;
@@ -63,7 +73,12 @@ export interface AccountStore {
   consumeVerificationCode(id: string, consumedAt: number): Promise<boolean>;
   getUserById(id: string): Promise<UserRecord | null>;
   getUserByPhoneHash(phoneHash: string): Promise<UserRecord | null>;
+  getUserByUsername(username: string): Promise<UserRecord | null>;
   createUser(user: UserRecord): Promise<void>;
+  updateUserCredentials(id: string, passwordHash: string, recoveryCodeHash: string, updatedAt: number): Promise<void>;
+  countAuthFailures(scopeKey: string, since: number): Promise<number>;
+  recordAuthFailure(record: AuthFailureRecord): Promise<void>;
+  clearAuthFailures(scopeKey: string): Promise<void>;
   updateUserNickname(id: string, nickname: string, updatedAt: number): Promise<void>;
   mergeGameOwner(fromPlayerId: string, toUserId: string): Promise<void>;
   listOwnedGameResults(ownerId: string, limit: number): Promise<OwnedGameResult[]>;

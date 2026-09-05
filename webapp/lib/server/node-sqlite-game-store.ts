@@ -5,6 +5,7 @@ import type { GameMode, GameStatus, Temperature } from '../contracts';
 import type {
   AccountSessionRecord,
   AccountStore,
+  AuthFailureRecord,
   OwnedGameResult,
   UserRecord,
   VerificationCodeRecord,
@@ -58,6 +59,7 @@ type VerificationCodeRow = {
 };
 type UserRow = {
   id: string; phone_hash: string; phone_last4: string; nickname: string;
+  username: string | null; password_hash: string | null; recovery_code_hash: string | null;
   created_at: number; updated_at: number;
 };
 type OwnedGameRow = {
@@ -152,7 +154,11 @@ export class NodeSqliteGameStore implements GameStore, AccountStore {
       );
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY NOT NULL, phone_hash TEXT NOT NULL UNIQUE, phone_last4 TEXT NOT NULL,
-        nickname TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        nickname TEXT NOT NULL, username TEXT, password_hash TEXT, recovery_code_hash TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS auth_failures (
+        id TEXT PRIMARY KEY NOT NULL, scope_key TEXT NOT NULL, created_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS account_sessions (
         id TEXT PRIMARY KEY NOT NULL, token_hash TEXT NOT NULL UNIQUE, player_id TEXT NOT NULL,
@@ -185,10 +191,17 @@ export class NodeSqliteGameStore implements GameStore, AccountStore {
         ON guesses(game_id, sequence);
       CREATE INDEX IF NOT EXISTS idx_guesses_game_score
         ON guesses(game_id, score_tenths DESC, sequence);
+      CREATE INDEX IF NOT EXISTS idx_auth_failures_scope_created
+        ON auth_failures(scope_key, created_at);
     `);
 
     const columns = this.db.prepare('PRAGMA table_info(guesses)').all() as Array<{ name: string }>;
     const gameColumns = this.db.prepare('PRAGMA table_info(games)').all() as Array<{ name: string }>;
+    const userColumns = this.db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+    if (!userColumns.some((column) => column.name === 'username')) this.db.exec('ALTER TABLE users ADD COLUMN username TEXT');
+    if (!userColumns.some((column) => column.name === 'password_hash')) this.db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT');
+    if (!userColumns.some((column) => column.name === 'recovery_code_hash')) this.db.exec('ALTER TABLE users ADD COLUMN recovery_code_hash TEXT');
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)');
     if (!gameColumns.some((column) => column.name === 'mode')) this.db.exec("ALTER TABLE games ADD COLUMN mode TEXT NOT NULL DEFAULT 'random'");
     if (!gameColumns.some((column) => column.name === 'daily_date')) this.db.exec('ALTER TABLE games ADD COLUMN daily_date TEXT');
     if (!gameColumns.some((column) => column.name === 'owner_id')) this.db.exec('ALTER TABLE games ADD COLUMN owner_id TEXT');
@@ -495,6 +508,10 @@ export class NodeSqliteGameStore implements GameStore, AccountStore {
     await this.init();
     this.db.prepare('DELETE FROM account_sessions WHERE id = ?').run(id);
   }
+  async deleteOtherAccountSessions(userId: string, exceptSessionId: string): Promise<void> {
+    await this.init();
+    this.db.prepare('DELETE FROM account_sessions WHERE user_id = ? AND id <> ?').run(userId, exceptSessionId);
+  }
   async createVerificationCode(code: VerificationCodeRecord): Promise<void> {
     await this.init();
     this.db.prepare(`INSERT INTO verification_codes
@@ -532,11 +549,40 @@ export class NodeSqliteGameStore implements GameStore, AccountStore {
     const row = this.db.prepare('SELECT * FROM users WHERE phone_hash = ?').get(phoneHash) as UserRow | undefined;
     return row ? mapUser(row) : null;
   }
+  async getUserByUsername(username: string): Promise<UserRecord | null> {
+    await this.init();
+    const row = this.db.prepare('SELECT * FROM users WHERE username = ?').get(username) as UserRow | undefined;
+    return row ? mapUser(row) : null;
+  }
   async createUser(user: UserRecord): Promise<void> {
     await this.init();
     this.db.prepare(`INSERT INTO users
-      (id, phone_hash, phone_last4, nickname, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(user.id, user.phoneHash, user.phoneLast4, user.nickname, user.createdAt, user.updatedAt);
+      (id, phone_hash, phone_last4, nickname, username, password_hash, recovery_code_hash, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(user.id, user.phoneHash, user.phoneLast4, user.nickname, user.username ?? null, user.passwordHash ?? null, user.recoveryCodeHash ?? null, user.createdAt, user.updatedAt);
+  }
+  async updateUserCredentials(id: string, passwordHash: string, recoveryCodeHash: string, updatedAt: number): Promise<void> {
+    await this.init();
+    this.db.prepare('UPDATE users SET password_hash = ?, recovery_code_hash = ?, updated_at = ? WHERE id = ?')
+      .run(passwordHash, recoveryCodeHash, updatedAt, id);
+  }
+  async countAuthFailures(scopeKey: string, since: number): Promise<number> {
+    await this.init();
+    const row = this.db.prepare('SELECT COUNT(*) count FROM auth_failures WHERE scope_key = ? AND created_at >= ?')
+      .get(scopeKey, since) as { count: number };
+    return row.count;
+  }
+  async recordAuthFailure(record: AuthFailureRecord): Promise<void> {
+    await this.init();
+    this.transaction(() => {
+      this.db.prepare('DELETE FROM auth_failures WHERE created_at < ?').run(record.createdAt - 24 * 60 * 60 * 1_000);
+      this.db.prepare('INSERT INTO auth_failures (id, scope_key, created_at) VALUES (?, ?, ?)')
+        .run(record.id, record.scopeKey, record.createdAt);
+    });
+  }
+  async clearAuthFailures(scopeKey: string): Promise<void> {
+    await this.init();
+    this.db.prepare('DELETE FROM auth_failures WHERE scope_key = ?').run(scopeKey);
   }
   async updateUserNickname(id: string, nickname: string, updatedAt: number): Promise<void> {
     await this.init();
@@ -660,7 +706,9 @@ function mapVerificationCode(row: VerificationCodeRow): VerificationCodeRecord {
 }
 
 function mapUser(row: UserRow): UserRecord {
-  return { id: row.id, phoneHash: row.phone_hash, phoneLast4: row.phone_last4, nickname: row.nickname, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, phoneHash: row.phone_hash, phoneLast4: row.phone_last4, nickname: row.nickname,
+    username: row.username, passwordHash: row.password_hash, recoveryCodeHash: row.recovery_code_hash,
+    createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 function mapOwnedGame(row: OwnedGameRow): OwnedGameResult {
