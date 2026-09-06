@@ -1084,7 +1084,7 @@ function AccountCenter({
         </div>
         <div className="account-tabs" role="tablist" aria-label="账号中心">
           <button type="button" role="tab" aria-selected={tab === 'account'} onClick={() => setTab('account')}>
-            {viewer.authenticated ? '我的' : '登录'}
+            {viewer.authenticated ? '我的' : '账号'}
           </button>
           <button type="button" role="tab" aria-selected={tab === 'leaderboard'} onClick={() => setTab('leaderboard')}>排行榜</button>
         </div>
