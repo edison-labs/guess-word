@@ -1000,6 +1000,15 @@ function AccountCenter({
     event.preventDefault();
     if (busy) return;
     setNotice('');
+    const normalizedUsername = username.normalize('NFKC').trim();
+    if (!/^[\p{Script=Han}A-Za-z][\p{Script=Han}A-Za-z0-9_]{2,19}$/u.test(normalizedUsername)) {
+      setNotice('用户名需为 3～20 个中文、字母、数字或下划线，且不能以数字开头。');
+      return;
+    }
+    if (Array.from(password).length < 8 || Array.from(password).length > 64) {
+      setNotice('登录口令需为 8～64 个字符。');
+      return;
+    }
     if (authMode !== 'login' && password !== confirmPassword) {
       setNotice('两次输入的登录口令不一致。');
       return;

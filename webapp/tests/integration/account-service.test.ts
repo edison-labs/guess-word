@@ -61,7 +61,7 @@ async function login(accounts: AccountService, phone: string) {
 
 describe('account service', () => {
   it('registers with a username, returns the recovery code once, and merges guest history', async () => {
-    const { accounts, games } = createHarness();
+    const { accounts, games, store } = createHarness();
     const guest = await accounts.ensureViewer(cookieRequest('http://localhost/api/auth/session'));
     const created = await games.createGame('动物', [], guest.session.playerId);
     await games.submitGuess(created.game.gameId, created.resumeToken, '企鹅');
@@ -77,6 +77,7 @@ describe('account service', () => {
       user: { username: 'edison_01', nickname: 'edison_01' },
     });
     expect(accounts.toViewerResponse(registered.context).user).not.toHaveProperty('maskedPhone');
+    expect((await store.getUserByUsername('edison_01'))?.passwordHash).toMatch(/^pbkdf2-sha512\$1000\$/);
     const dashboard = await accounts.getDashboard(cookieRequest('http://localhost/api/account', cookieHeader(registered.context.setCookie)));
     expect(dashboard.stats.completedGames).toBe(1);
   });

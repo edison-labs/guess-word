@@ -211,6 +211,10 @@ test('guest progress merges into a username account and appears on the same-puzz
   await page.getByRole('button', { name: '登录 / 排行' }).click();
   const accountDialog = page.getByRole('dialog', { name: '登录后保存全部战绩' });
   await expect(accountDialog).toBeVisible();
+  await page.getByLabel('用户名').fill('12345');
+  await page.getByLabel('登录口令', { exact: true }).fill('12345678');
+  await page.getByRole('button', { name: '登录并保存战绩' }).click();
+  await expect(page.getByText('用户名需为 3～20 个中文、字母、数字或下划线，且不能以数字开头。')).toBeVisible();
   await accountDialog.getByRole('tab', { name: '创建账号' }).click();
   await page.getByLabel('用户名').fill(nickname);
   await page.getByLabel('登录口令', { exact: true }).fill('e2e secure password');

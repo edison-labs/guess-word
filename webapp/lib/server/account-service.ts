@@ -22,7 +22,8 @@ const MAX_CODES_PER_HOUR = 5;
 const MAX_CODE_ATTEMPTS = 5;
 const AUTH_FAILURE_WINDOW_MS = 15 * 60 * 1_000;
 const MAX_AUTH_FAILURES = 5;
-const DEFAULT_PASSWORD_ITERATIONS = 600_000;
+const DEFAULT_PASSWORD_ITERATIONS = 210_000;
+const DEFAULT_PASSWORD_ALGORITHM = 'pbkdf2-sha512';
 const RECOVERY_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 type AccountServiceOptions = {
@@ -222,6 +223,13 @@ export class AccountService {
     if (!user || !user.passwordHash || !valid) {
       await this.recordAuthFailure(scopeKey);
       throw new GameError('INVALID_REQUEST', '用户名或登录口令不正确。', 401);
+    }
+    if (user.recoveryCodeHash && needsPasswordRehash(user.passwordHash, this.passwordIterations)) {
+      const passwordHash = await hashPassword(password, this.options.secret, this.passwordIterations);
+      const updatedAt = this.now();
+      await this.options.store.updateUserCredentials(user.id, passwordHash, user.recoveryCodeHash, updatedAt);
+      user.passwordHash = passwordHash;
+      user.updatedAt = updatedAt;
     }
     await this.options.store.clearAuthFailures(scopeKey);
     return this.signIn(request, context, user);
@@ -545,26 +553,26 @@ function randomRecoveryCode(): string {
 
 async function hashPassword(password: string, secret: string, iterations: number): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const hash = await derivePassword(password, secret, salt, iterations);
-  return `pbkdf2-sha256$${iterations}$${encodeBase64Url(salt)}$${encodeBase64Url(hash)}`;
+  const hash = await derivePassword(password, secret, salt, iterations, 'SHA-512');
+  return `${DEFAULT_PASSWORD_ALGORITHM}$${iterations}$${encodeBase64Url(salt)}$${encodeBase64Url(hash)}`;
 }
 
 async function verifyPassword(password: string, encoded: string, secret: string): Promise<boolean> {
   const parts = encoded.split('$');
-  if (parts.length !== 4 || parts[0] !== 'pbkdf2-sha256') return false;
+  if (parts.length !== 4 || !['pbkdf2-sha256', 'pbkdf2-sha512'].includes(parts[0])) return false;
   const iterations = Number(parts[1]);
   if (!Number.isSafeInteger(iterations) || iterations < 1 || iterations > 1_000_000) return false;
   try {
     const salt = decodeBase64Url(parts[2]);
     const expected = decodeBase64Url(parts[3]);
-    const actual = await derivePassword(password, secret, salt, iterations);
+    const actual = await derivePassword(password, secret, salt, iterations, parts[0] === 'pbkdf2-sha512' ? 'SHA-512' : 'SHA-256');
     return constantTimeEqualBytes(actual, expected);
   } catch {
     return false;
   }
 }
 
-async function derivePassword(password: string, secret: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
+async function derivePassword(password: string, secret: string, salt: Uint8Array, iterations: number, hash: 'SHA-256' | 'SHA-512'): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(`${secret}\u0000${password}`),
@@ -572,13 +580,18 @@ async function derivePassword(password: string, secret: string, salt: Uint8Array
     false,
     ['deriveBits'],
   );
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: new Uint8Array(salt), iterations }, key, 256);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash, salt: new Uint8Array(salt), iterations }, key, 256);
   return new Uint8Array(bits);
 }
 
 function dummyPasswordHash(iterations: number): string {
   const empty = encodeBase64Url(new Uint8Array(16));
-  return `pbkdf2-sha256$${iterations}$${empty}$${encodeBase64Url(new Uint8Array(32))}`;
+  return `${DEFAULT_PASSWORD_ALGORITHM}$${iterations}$${empty}$${encodeBase64Url(new Uint8Array(32))}`;
+}
+
+function needsPasswordRehash(encoded: string, iterations: number): boolean {
+  const parts = encoded.split('$');
+  return parts[0] !== DEFAULT_PASSWORD_ALGORITHM || Number(parts[1]) !== iterations;
 }
 
 function decodeBase64Url(value: string): Uint8Array {
