@@ -879,8 +879,6 @@ function AccountCenter({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<'account' | 'leaderboard'>('account');
-  const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'recover'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -888,8 +886,7 @@ function AccountCenter({
   const [recoveryInput, setRecoveryInput] = useState('');
   const [newRecoveryCode, setNewRecoveryCode] = useState('');
   const [nickname, setNickname] = useState(viewer.user?.nickname ?? '');
-  const [cooldown, setCooldown] = useState(0);
-  const [busy, setBusy] = useState<'code' | 'sms-login' | 'password-login' | 'register' | 'recover' | 'profile' | 'logout' | null>(null);
+  const [busy, setBusy] = useState<'password-login' | 'register' | 'recover' | 'profile' | 'logout' | null>(null);
   const [notice, setNotice] = useState('');
   const [dashboard, setDashboard] = useState<AccountDashboardResponse | null>(null);
   const [boardType, setBoardType] = useState<'daily' | 'challenge'>('daily');
@@ -959,43 +956,6 @@ function AccountCenter({
       .catch((error: unknown) => { if (active) setNotice(getFriendlyError(error)); });
     return () => { active = false; };
   }, [boardType, currentGameId, tab]);
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = window.setInterval(() => setCooldown((current) => Math.max(0, current - 1)), 1_000);
-    return () => window.clearInterval(timer);
-  }, [cooldown]);
-
-  async function requestCode() {
-    if (busy || cooldown > 0) return;
-    setBusy('code');
-    setNotice('');
-    try {
-      const result = await apiRequest<{ cooldownSeconds: number }>('/api/auth/sms/request', {
-        method: 'POST', body: JSON.stringify({ phone }),
-      });
-      setCooldown(result.cooldownSeconds);
-      setNotice('验证码已发送，5 分钟内有效。');
-    } catch (error) { setNotice(getFriendlyError(error)); }
-    finally { setBusy(null); }
-  }
-
-  async function loginWithSms(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy) return;
-    setBusy('sms-login');
-    setNotice('');
-    try {
-      const result = await apiRequest<ViewerResponse>('/api/auth/sms/verify', {
-        method: 'POST', body: JSON.stringify({ phone, code }),
-      });
-      onViewerChange(result);
-      setNickname(result.user?.nickname ?? '');
-      setNotice('登录成功，当前游客战绩已合并。');
-      setCode('');
-    } catch (error) { setNotice(getFriendlyError(error)); }
-    finally { setBusy(null); }
-  }
-
   async function submitCredential(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
@@ -1068,8 +1028,6 @@ function AccountCenter({
       const result = await apiRequest<ViewerResponse>('/api/auth/logout', { method: 'POST', body: '{}' });
       onViewerChange(result);
       setDashboard(null);
-      setPhone('');
-      setCode('');
       setUsername('');
       setPassword('');
       setConfirmPassword('');
@@ -1120,19 +1078,6 @@ function AccountCenter({
               </button>
             </form>
             {notice && <p className="account-notice credential-notice" role="status">{notice}</p>}
-            <details className="sms-login">
-              <summary>使用手机号验证码登录</summary>
-              <form className="login-form" onSubmit={loginWithSms}>
-                <label htmlFor="login-phone">手机号</label>
-                <div className="code-row">
-                  <input id="login-phone" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="请输入 11 位手机号" />
-                  <button className="secondary" type="button" disabled={Boolean(busy) || cooldown > 0} onClick={() => void requestCode()}>{cooldown > 0 ? `${cooldown}s` : busy === 'code' ? '发送中…' : '获取验证码'}</button>
-                </div>
-                <label htmlFor="login-code">验证码</label>
-                <input id="login-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="6 位验证码" />
-                <button className="secondary" type="submit" disabled={Boolean(busy)}>{busy === 'sms-login' ? '登录中…' : '手机号登录'}</button>
-              </form>
-            </details>
           </div>
         )}
 
