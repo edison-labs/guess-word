@@ -213,9 +213,12 @@ h2 { margin: 0; font-size: 1.08rem; letter-spacing: -.03em; }
 .account-dialog-head { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
 .account-dialog-head h2 { margin-top: .12rem; }
 .dialog-close { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 1px solid var(--line); border-radius: .65rem; background: var(--soft); color: var(--muted); font-size: 1.3rem; }
-.account-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem; margin: .85rem 0; padding: .22rem; border: 1px solid var(--line); border-radius: .72rem; background: var(--soft); }
-.account-tabs button { min-height: 40px; border: 0; border-radius: .52rem; background: transparent; color: var(--muted); font-weight: 800; }
-.account-tabs button[aria-selected="true"] { background: var(--surface); color: var(--accent-dark); box-shadow: 0 2px 8px rgb(76 50 29 / 10%); }
+.account-tabs { display: flex; gap: 1.25rem; margin: .8rem 0 .9rem; border-bottom: 1px solid var(--line); }
+.account-tabs button { position: relative; min-height: 42px; padding: 0 .15rem; border: 0; background: transparent; color: var(--muted); font-weight: 800; }
+.account-tabs button::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 3px; border-radius: 3px 3px 0 0; background: transparent; content: ""; }
+.account-tabs button[aria-selected="true"] { color: var(--accent-dark); }
+.account-tabs button[aria-selected="true"]::after { background: var(--accent); }
+.account-tabs button:hover { color: var(--ink); }
 .login-form { display: grid; gap: .52rem; }
 .login-form > p { margin: 0 0 .25rem; color: var(--muted); font-size: .72rem; line-height: 1.5; }
 .login-form label, .profile-form label { color: #634d3e; font-size: .7rem; font-weight: 800; }
@@ -226,7 +229,7 @@ h2 { margin: 0; font-size: 1.08rem; letter-spacing: -.03em; }
 .credential-panel { display: grid; gap: .7rem; }
 .auth-mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem; padding: .22rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--soft); }
 .auth-mode-switch button { min-height: 38px; border: 0; border-radius: .48rem; background: transparent; color: var(--muted); font-weight: 800; }
-.auth-mode-switch button[aria-selected="true"] { background: white; color: var(--accent-dark); box-shadow: 0 2px 8px rgb(76 50 29 / 10%); }
+.auth-mode-switch button[aria-selected="true"] { background: var(--accent-dark); color: white; box-shadow: 0 4px 12px rgb(111 42 8 / 18%); }
 .auth-recover-link { justify-self: start; margin-top: 0; }
 .sms-login { padding-top: .65rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .7rem; }
 .sms-login summary { width: fit-content; cursor: pointer; color: #795847; font-weight: 750; }
