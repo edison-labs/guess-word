@@ -1107,16 +1107,19 @@ function AccountCenter({
             <form className="login-form" onSubmit={submitCredential}>
               <p>{authMode === 'register' ? '创建后会生成一个恢复码，请妥善保存；游客战绩会自动合并。' : authMode === 'recover' ? '输入恢复码并设置新的登录口令。成功后旧恢复码会失效。' : '使用用户名和登录口令登录，登录前的游客战绩会自动合并。'}</p>
               <label htmlFor="login-username">用户名</label>
-              <input id="login-username" autoCapitalize="none" autoComplete="username" maxLength={20} value={username} onChange={(event) => setUsername(event.target.value)} placeholder="3～20 个字符" />
-              {authMode === 'recover' && <><label htmlFor="login-recovery">恢复码</label><input id="login-recovery" autoCapitalize="characters" autoComplete="off" value={recoveryInput} onChange={(event) => setRecoveryInput(event.target.value)} placeholder="GW-XXXX-XXXX-XXXX-XXXX-XXXX" /></>}
+              <input id="login-username" aria-describedby="username-help" autoCapitalize="none" autoComplete="username" maxLength={20} value={username} onChange={(event) => setUsername(event.target.value)} placeholder="例如：edison_01" />
+              <small id="username-help" className="field-help">3～20 个中文、字母、数字或下划线，不能以数字开头</small>
+              {authMode === 'recover' && <><label htmlFor="login-recovery">恢复码</label><input id="login-recovery" aria-describedby="recovery-help" autoCapitalize="characters" autoComplete="off" value={recoveryInput} onChange={(event) => setRecoveryInput(event.target.value)} placeholder="GW-XXXX-XXXX-XXXX-XXXX-XXXX" /><small id="recovery-help" className="field-help">输入创建账号或上次找回时保存的最新恢复码</small></>}
               <label htmlFor="login-password">{authMode === 'recover' ? '新登录口令' : '登录口令'}</label>
-              <input id="login-password" type="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} maxLength={64} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={authMode === 'login' ? '请输入登录口令' : '至少 8 个字符'} />
+              <input id="login-password" aria-describedby="password-help" type="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} maxLength={64} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入 8～64 个字符" />
+              <small id="password-help" className="field-help">登录口令长度为 8～64 个字符，不会以明文保存</small>
               {authMode !== 'login' && <><label htmlFor="login-password-confirm">再次输入登录口令</label><input id="login-password-confirm" type="password" autoComplete="new-password" maxLength={64} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="请再次输入" /></>}
               <button className="primary" type="submit" disabled={Boolean(busy)}>{busy ? '处理中…' : authMode === 'login' ? '登录并保存战绩' : authMode === 'register' ? '创建账号' : '重置口令并登录'}</button>
               <button className="text-action auth-recover-link" type="button" onClick={() => { setAuthMode(authMode === 'recover' ? 'login' : 'recover'); setNotice(''); }}>
                 {authMode === 'recover' ? '返回登录' : '忘记登录口令？'}
               </button>
             </form>
+            {notice && <p className="account-notice credential-notice" role="status">{notice}</p>}
             <details className="sms-login">
               <summary>使用手机号验证码登录</summary>
               <form className="login-form" onSubmit={loginWithSms}>
@@ -1194,7 +1197,7 @@ function AccountCenter({
             {!currentGameId && <p className="ranking-note">完成或打开一道题后，可以查看这道题的好友同题榜。</p>}
           </div>
         )}
-        {notice && <p className="account-notice" role="status">{notice}</p>}
+        {notice && (tab !== 'account' || viewer.authenticated) && <p className="account-notice" role="status">{notice}</p>}
       </section>
     </div>
   );

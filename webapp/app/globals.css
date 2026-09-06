@@ -219,6 +219,7 @@ h2 { margin: 0; font-size: 1.08rem; letter-spacing: -.03em; }
 .login-form { display: grid; gap: .52rem; }
 .login-form > p { margin: 0 0 .25rem; color: var(--muted); font-size: .72rem; line-height: 1.5; }
 .login-form label, .profile-form label { color: #634d3e; font-size: .7rem; font-weight: 800; }
+.field-help { display: block; margin: -.25rem 0 .12rem; color: var(--muted); font-size: .66rem; line-height: 1.45; }
 .login-form input, .profile-form input { min-width: 0; min-height: 44px; padding: 0 .75rem; border: 1px solid #d9cabb; border-radius: .62rem; outline: none; background: white; }
 .login-form input:focus, .profile-form input:focus { border-color: #d26a2b; box-shadow: 0 0 0 3px rgb(210 106 43 / 12%); }
 .login-form > .primary { margin-top: .28rem; }
@@ -261,6 +262,7 @@ h2 { margin: 0; font-size: 1.08rem; letter-spacing: -.03em; }
 .leaderboard-list small { color: var(--muted); font-size: .62rem; }
 .panel-empty, .ranking-note { margin: .75rem 0; color: var(--muted); font-size: .7rem; line-height: 1.5; }
 .account-notice { margin: .75rem 0 0; padding: .55rem .65rem; border-radius: .55rem; background: #fff4dd; color: #774a16; font-size: .7rem; line-height: 1.45; }
+.credential-notice { margin-top: 0; }
 
 button { transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease; }
 button:hover { filter: brightness(.97); }
